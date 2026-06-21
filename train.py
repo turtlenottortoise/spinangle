@@ -54,14 +54,28 @@ def run(cfg):
 
     world_model = hydra.utils.instantiate(cfg.model)
 
-    optimizers = {
-        'model_opt': {
-            "modules": 'model',
-            "optimizer": dict(cfg.optimizer),
-            "scheduler": {"type": "LinearWarmupCosineAnnealingLR"},
-            "interval": "epoch",
-        },
-    }
+    # Optimizer / scheduler spec.
+    # Default reproduces official LeWM exactly: one AdamW group over `model` with a
+    # LinearWarmupCosineAnnealingLR schedule. Phase-7 (nGPT/νGPT) overrides:
+    #   * cfg.scheduler          -> custom warmup/anneal kwargs (reduced warmup)
+    #   * cfg.optimizer.exclude_bias_norm: true -> no weight decay on bias/norm
+    #     (handled natively by spt.create_optimizer via named_params)
+    #   * cfg.optim_groups       -> full multi-group spt optim spec; spt assigns
+    #     parameters to groups by regex on module names, enabling per-group LR
+    #     (e.g. a higher LR on the spherical gate/update sub-networks).
+    sched = OmegaConf.to_container(cfg.scheduler, resolve=True) \
+        if cfg.get("scheduler") else {"type": "LinearWarmupCosineAnnealingLR"}
+    if cfg.get("optim_groups"):
+        optimizers = OmegaConf.to_container(cfg.optim_groups, resolve=True)
+    else:
+        optimizers = {
+            'model_opt': {
+                "modules": 'model',
+                "optimizer": dict(cfg.optimizer),
+                "scheduler": sched,
+                "interval": "epoch",
+            },
+        }
 
     data_module = spt.data.DataModule(train=train, val=val)
     world_model = spt.Module(

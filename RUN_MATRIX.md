@@ -2,8 +2,18 @@
 
 Every run uses LeWM's **own** `train.py` / `eval.py` and the **same** planner budget
 (CEM: 300 samples, 30 steps, top-k 30, horizon 5, action_block 5, eval_budget 50,
-num_eval 50). Only `+experiment=` and `data=` change. Set `STABLEWM_HOME` and
-download data first (see `official_lewm_reproduction.md`).
+num_eval 50). Only `+experiment=` and `data=` change.
+
+## Download official data + checkpoints
+```bash
+export STABLEWM_HOME=/content/stable-wm
+# tworoom is the lightest dataset (3.4G) -> do this first to validate the full loop
+python scripts/download_assets.py --benchmark tworoom --data --ckpt
+# others: pusht (13G), reacher (24G), cube (46G) -- ckpt-only is small if disk is tight
+python scripts/download_assets.py --benchmark pusht --ckpt
+```
+`--ckpt` rebuilds the official weights into `$STABLEWM_HOME/<bench>/lewm_object.ckpt`
+(eval with `policy=<bench>/lewm`). Datasets land as `.h5` under `$STABLEWM_HOME`.
 
 ## Training (per variant)
 ```bash
@@ -59,11 +69,17 @@ for N in 50 100 300 600; do
 done
 ```
 
-## Phase 7 — νGPT-style LR (optional)
-Compare global LR vs. parameter-group LR / higher LR + reduced warmup, e.g.:
+## Phase 7 — νGPT-style LR / scaling
+Three points to compare (stability, speed, final performance):
 ```bash
-python train.py +experiment=gated_spherical data=pusht optimizer.lr=2e-4
+python train.py +experiment=gated_spherical data=pusht                 # global LR (baseline)
+python train.py +experiment=ngpt_lr         data=pusht                 # global high LR + reduced warmup + no-WD-on-norm
+python train.py +experiment=ngpt_lr_groups  data=pusht                 # per-group LR (higher LR on spherical transition nets)
 ```
+`ngpt_lr_groups` assigns params to optimizer groups by **regex on module names**
+(spt-native); verify the match on the first run via the printed optimizer groups.
+`ngpt_lr`'s `scheduler.warmup_epochs` uses the pl_bolts signature — adjust if spt's
+`LinearWarmupCosineAnnealingLR` differs.
 
 ## Suggested order
 1. Phase 1 reproduce official (`official_lewm`, pretrained ckpt + retrain) — **gate**.

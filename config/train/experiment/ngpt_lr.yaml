@@ -1,0 +1,27 @@
+# @package _global_
+# Phase 7 (νGPT scaling, GLOBAL LR): gated spherical trained with a high learning
+# rate, reduced warmup, and no weight decay on bias/norm params. The bet (from nGPT)
+# is that unit-norm dynamics tolerate larger steps -> faster, stable convergence.
+# Compare stability / speed / final performance vs. +experiment=gated_spherical.
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: ngpt_lr
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none
+
+optimizer:
+  type: AdamW
+  lr: 2.0e-4              # 4x the official 5e-5
+  weight_decay: 1.0e-3
+  exclude_bias_norm: true # spt.create_optimizer -> no weight decay on bias/norm
+
+scheduler:
+  type: LinearWarmupCosineAnnealingLR
+  warmup_epochs: 2        # reduced warmup (pl_bolts signature; verify kwarg on 1st run)

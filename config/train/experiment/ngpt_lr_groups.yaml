@@ -1,0 +1,31 @@
+# @package _global_
+# Phase 7 (νGPT scaling, PARAMETER GROUPS): two optimizer groups. spt assigns
+# parameters to groups by regex on qualified module names (more specific pattern
+# wins, direct params only), so the spherical gate/update transition sub-networks
+# get a higher LR than the encoder/projector/backbone. Compare against global LR
+# (gated_spherical) and global high LR (ngpt_lr).
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: ngpt_lr_groups
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none
+
+# Full spt optim spec (consumed by train.py when cfg.optim_groups is set).
+optim_groups:
+  base_opt:
+    modules: "model"                     # everything (inherited) ...
+    optimizer: {type: AdamW, lr: 5.0e-5, weight_decay: 1.0e-3, exclude_bias_norm: true}
+    scheduler: {type: LinearWarmupCosineAnnealingLR}
+    interval: epoch
+  ngpt_opt:
+    modules: "model\\.predictor\\.(update_net|update_mlp|gate|keep|write).*"  # ... except the spherical transition nets
+    optimizer: {type: AdamW, lr: 2.0e-4, weight_decay: 1.0e-3, exclude_bias_norm: true}
+    scheduler: {type: LinearWarmupCosineAnnealingLR}
+    interval: epoch
