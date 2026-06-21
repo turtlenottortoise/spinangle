@@ -1,0 +1,32 @@
+# vendored upstream clone (provenance kept via UPSTREAM_COMMIT.txt + UPSTREAM_README.md)
+_upstream_le-wm/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# ml artifacts (keep configs/results/plots/report; never commit big binaries)
+*.ckpt
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.tar.zst
+*.zst
+wandb/
+outputs/
+multirun/
+.hydra/
+checkpoints/*
+!checkpoints/.gitkeep
+
+# eval scratch from LeWM eval.py
+*_results.txt
+*.mp4
+
+# os
+.DS_Store

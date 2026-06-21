@@ -1,0 +1,59 @@
+defaults:
+  - _self_
+  - launcher: local
+  - data: pusht
+  - model: lewm
+
+output_model_name: lewm
+subdir: ${hydra:job.id}
+
+num_workers: 6
+train_split: 0.9
+seed: 3072
+img_size: 224
+embed_dim: 192
+history_size: 3
+
+trainer:
+  max_epochs: 100
+  devices: auto
+  accelerator: gpu
+  precision: bf16
+  gradient_clip_val: 1.0
+
+loader:
+  batch_size: 128
+  num_workers: ${num_workers}
+  persistent_workers: True
+  prefetch_factor: 3
+  pin_memory: True
+
+optimizer:
+  type: AdamW
+  lr: 5e-5
+  weight_decay: 1e-3
+
+num_preds: 1
+
+# ---------------------------------------------------------------------------
+# Loss configuration.
+# The block below reproduces the *official* LeWM objective exactly:
+#   loss = MSE(pred, target) + 0.09 * SIGReg(emb)
+# nGPT-JEPA variants override pred.type / sigreg.target / anticollapse / memory
+# via their model config or the CLI; the official defaults are unchanged.
+# ---------------------------------------------------------------------------
+loss:
+  pred:
+    type: mse              # mse (official) | cosine (spherical angular loss)
+    stop_grad_target: false  # official LeWM uses NO stop-grad and NO EMA target
+  sigreg:
+    weight: 0.09
+    target: emb            # emb (official) | projector_z | none
+    kwargs:
+      knots: 17
+      num_proj: 1024
+  anticollapse:
+    weight: 0.0            # spherical pairwise-cosine anti-collapse penalty
+  memory:
+    weight: 0.0            # in-batch future/goal NCE retrieval pressure
+    temperature: 0.1

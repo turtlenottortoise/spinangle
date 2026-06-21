@@ -1,0 +1,15 @@
+# @package _global_
+# Variant A: official LeWM (unchanged). This experiment exists only so every run
+# uses the same uniform CLI; it sets nothing beyond the official defaults.
+defaults:
+  - override /model: lewm
+
+output_model_name: official_lewm
+
+loss:
+  pred:
+    type: mse
+    stop_grad_target: false
+  sigreg:
+    weight: 0.09
+    target: emb

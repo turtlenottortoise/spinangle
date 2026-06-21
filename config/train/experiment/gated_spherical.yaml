@@ -1,0 +1,17 @@
+# @package _global_
+# Variant F (MAIN): gated spherical nGPT-JEPA.
+#   u = normalize(UpdateNet(h_t, a_t)); g = sigmoid(GateNet(h_t, a_t))
+#   h_pred = normalize((1 - g) * h_t + g * u)
+# Angular loss, no regularizer (matched to D/E so the comparison isolates the gate).
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_spherical
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none

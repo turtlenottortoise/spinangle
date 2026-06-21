@@ -1,0 +1,15 @@
+# @package _global_
+# Variant E: full-ish nGPT residual JEPA (also the "no gate" ablation of F).
+#   h_pred = normalize(h_t + alpha * normalize(UpdateNet(h_t, a_t)))
+defaults:
+  - override /model: fullish_residual
+
+output_model_name: fullish_residual
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none

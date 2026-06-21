@@ -1,0 +1,17 @@
+# @package _global_
+# Variant G: gated spherical nGPT-JEPA + projector SIGReg.
+# h stays on the unit sphere; z = Projector(h) is regularized toward an isotropic
+# Gaussian with the SAME SIGReg objective and weight as official LeWM. This tests
+# whether spherical h and Gaussian z are complementary (vs. direct SIGReg on h).
+defaults:
+  - override /model: gated_spherical_projector_sigreg
+
+output_model_name: gated_spherical_projector_sigreg
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.09
+    target: projector_z

@@ -1,0 +1,16 @@
+# @package _global_
+# Ablation (#13): gated spherical with SIGReg applied DIRECTLY to the unit-sphere
+# state h (target=emb) instead of to a projector z. Expected to expose the
+# geometric conflict between "h is unit-norm" and "h is isotropic Gaussian".
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_direct_sigreg_h
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.09
+    target: emb

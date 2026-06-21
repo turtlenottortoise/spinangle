@@ -1,0 +1,57 @@
+# Variant F (main proposed model): Gated spherical nGPT-JEPA.
+#   u = normalize(UpdateNet(h_t, a_t))
+#   g = sigmoid(GateNet(h_t, a_t))
+#   h_pred = normalize((1 - g) * h_t + g * u)
+# Encoder / action_encoder / projector are IDENTICAL to config/train/model/lewm.yaml
+# (vit-tiny + BatchNorm MLP projector). Only the predictor and the unit-sphere
+# normalization flags differ, so capacity stays matched to official LeWM.
+_target_: jepa.JEPA
+
+normalize_emb: true     # h = normalize(encoder(obs))
+normalize_pred: true    # keep autoregressive rollout on the sphere
+
+encoder:
+  _target_: stable_pretraining.backbone.utils.vit_hf
+  size: tiny
+  patch_size: 14
+  image_size: ${img_size}
+  pretrained: false
+  use_mask_token: false
+
+predictor:
+  _target_: variants.SphericalARPredictor
+  mode: gated
+  alpha: 1.0
+  gate_dim: channel        # per-channel gate (GRU-like); "scalar" = pure geodesic step
+  gate_bias_init: 0.0      # sigmoid(0)=0.5 initial update fraction
+  update_mlp: true         # pred_proj-shaped MLP folded into UpdateNet (capacity match)
+  update_mlp_hidden: 2048
+  num_frames: ${history_size}
+  input_dim: ${embed_dim}
+  hidden_dim: ${embed_dim}
+  output_dim: ${embed_dim}
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+  act_dim: ${embed_dim}
+
+action_encoder:
+  _target_: module.Embedder
+  input_dim: ???
+  emb_dim: ${embed_dim}
+
+projector:
+  _target_: module.MLP
+  input_dim: ${embed_dim}
+  output_dim: ${embed_dim}
+  hidden_dim: 2048
+  norm_fn:
+    _target_: torch.nn.BatchNorm1d
+    _partial_: true
+
+# pred_proj folded into the predictor (update_mlp); external pred_proj is Identity
+# so the unit-sphere geometry is preserved after the predictor.
+pred_proj: null

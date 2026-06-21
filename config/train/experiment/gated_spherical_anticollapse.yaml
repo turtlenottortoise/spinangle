@@ -1,0 +1,18 @@
+# @package _global_
+# Fallback / ablation: gated spherical with a spherical anti-collapse penalty
+# (mean off-diagonal cosine) instead of SIGReg. Use if the no-regularizer spherical
+# variants (D/E/F) collapse; this is the sphere-native anti-collapse analogue.
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_spherical_anticollapse
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none
+  anticollapse:
+    weight: 0.1

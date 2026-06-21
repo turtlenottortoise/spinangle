@@ -1,0 +1,20 @@
+# @package _global_
+# Variant H: gated spherical nGPT-JEPA + future/goal memory NCE.
+# In-batch InfoNCE with unit-normalized, detached target keys: the predicted future
+# state must retrieve its own target among negatives. Tests whether retrieval
+# pressure improves planning (decision rule: retrieval gain alone is not a win).
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_spherical_memory
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none
+  memory:
+    weight: 0.5
+    temperature: 0.1

@@ -1,0 +1,17 @@
+# @package _global_
+# Variant D: simple spherical JEPA. normalize(h), normalize(target), normalize(pred),
+# angular loss 1 - cos(h_pred, h_target). NO regularizer (Phase-2 literal spec) ->
+# this is a deliberate control: if it collapses without regularization, that is a
+# reportable finding that motivates projector SIGReg (variant G). Tracks emb_norm.
+defaults:
+  - override /model: simple_spherical
+
+output_model_name: simple_spherical
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none

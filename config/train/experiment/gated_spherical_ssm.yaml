@@ -1,0 +1,17 @@
+# @package _global_
+# Variant I: gated spherical nGPT-JEPA with a selective-SSM transition.
+#   keep = sigmoid(K(h_t,a_t)); write = sigmoid(W(h_t,a_t)); cand = normalize(U)
+#   h_pred = normalize(keep * h_t + write * cand)
+# SSM gating is applied ONLY to the action-conditioned transition.
+defaults:
+  - override /model: gated_spherical_ssm
+
+output_model_name: gated_spherical_ssm
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none

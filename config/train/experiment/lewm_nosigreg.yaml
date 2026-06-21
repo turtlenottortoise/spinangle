@@ -1,0 +1,16 @@
+# @package _global_
+# Variants B & C: official LeWM architecture with SIGReg DISABLED.
+#   B: "how much does LeWM depend on SIGReg?"
+#   C: the non-normalized Euclidean-MSE JEPA baseline (same capacity, no norm).
+defaults:
+  - override /model: lewm
+
+output_model_name: lewm_nosigreg
+
+loss:
+  pred:
+    type: mse
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none
