@@ -23,8 +23,13 @@ fi
 command -v uv >/dev/null 2>&1 || pip install -q uv || curl -LsSf https://astral.sh/uv/install.sh | sh
 uv python install 3.10
 uv venv --python 3.10 "$VENV"
-uv pip install --python "$PY" "stable-worldmodel[train,env]"
-uv pip install --python "$PY" matplotlib huggingface_hub
+# [train] is required (hydra, stable-pretraining, transformers, wandb).
+uv pip install --python "$PY" "stable-worldmodel[train]" matplotlib huggingface_hub
+# Try the full [env] extra; if it can't resolve (it bundles Crafter/craftax + Atari/
+# ale-py, which aren't LeWM benchmarks and pin conflicting jax/gymnasium), install the
+# env deps that the LeWM benchmarks (pusht/tworoom/reacher/cube) actually use.
+uv pip install --python "$PY" "stable-worldmodel[env]" \
+  || uv pip install --python "$PY" pygame pymunk shapely dm_control mujoco ogbench
 
 # ensure CUDA torch in the venv
 if ! "$PY" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
