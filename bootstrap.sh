@@ -7,6 +7,7 @@ set -euo pipefail
 export STABLEWM_HOME="${STABLEWM_HOME:-$HOME/.stable-wm}"
 export MUJOCO_GL="${MUJOCO_GL:-egl}"
 export PYOPENGL_PLATFORM="${PYOPENGL_PLATFORM:-egl}"
+export MPLBACKEND="${MPLBACKEND:-Agg}"   # avoid inline-backend matplotlib import errors
 VENV="${VENV:-$PWD/.venv-lewm}"
 PY="$VENV/bin/python"
 mkdir -p "$STABLEWM_HOME"
@@ -15,7 +16,7 @@ echo "STABLEWM_HOME=$STABLEWM_HOME  VENV=$VENV"
 # --- system libs for headless env rendering during eval (pygame + MuJoCo) ---
 if command -v apt-get >/dev/null 2>&1; then
   sudo apt-get -qq update
-  sudo apt-get -qq install -y xvfb zstd ffmpeg patchelf git curl \
+  sudo apt-get -qq install -y xvfb zstd swig ffmpeg patchelf git curl \
     libegl1 libgl1-mesa-glx libosmesa6 libglfw3 libglew2.2 >/dev/null
 fi
 
@@ -23,8 +24,9 @@ fi
 command -v uv >/dev/null 2>&1 || pip install -q uv || curl -LsSf https://astral.sh/uv/install.sh | sh
 uv python install 3.10
 uv venv --python 3.10 "$VENV"
-# [train] is required (hydra, stable-pretraining, transformers, wandb).
-uv pip install --python "$PY" "stable-worldmodel[train]" matplotlib huggingface_hub
+# [train] (hydra, spt, transformers, wandb) + [format] (h5py, imageio) are required.
+uv pip install --python "$PY" "stable-worldmodel[train,format]" matplotlib huggingface_hub imageio-ffmpeg \
+  || uv pip install --python "$PY" "stable-worldmodel[train]" matplotlib huggingface_hub imageio imageio-ffmpeg h5py
 # Try the full [env] extra; if it can't resolve (it bundles Crafter/craftax + Atari/
 # ale-py, which aren't LeWM benchmarks and pin conflicting jax/gymnasium), install the
 # env deps that the LeWM benchmarks (pusht/tworoom/reacher/cube) actually use.
