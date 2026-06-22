@@ -123,11 +123,23 @@ def main():
     args = ap.parse_args()
     if not (args.data or args.ckpt):
         ap.error("pass --data and/or --ckpt")
-    print(f"STABLEWM_HOME={home()}")
+    print(f"STABLEWM_HOME={home()}", flush=True)
+    import sys
+    import traceback
     if args.data:
-        fetch_data(args.benchmark)
+        try:
+            fetch_data(args.benchmark)
+        except Exception:
+            print("\n[FAILED] DATA stage:", flush=True)
+            traceback.print_exc(file=sys.stdout)
+            sys.exit(1)
     if args.ckpt:
-        convert_ckpt(args.benchmark)
+        try:
+            convert_ckpt(args.benchmark)
+        except Exception:
+            print("\n[FAILED] CKPT stage:", flush=True)
+            traceback.print_exc(file=sys.stdout)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

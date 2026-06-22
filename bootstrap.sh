@@ -33,6 +33,16 @@ uv pip install --python "$PY" "stable-worldmodel[train,format]" matplotlib huggi
 uv pip install --python "$PY" "stable-worldmodel[env]" \
   || uv pip install --python "$PY" pygame pymunk shapely dm_control mujoco ogbench
 
+# Compatibility pins (found while bringing the stack up on Colab):
+#  - transformers<5 keeps the OLD ViT state-dict key names, so load_state_dict(strict=True)
+#    matches the published LeWM checkpoint (transformers 5 renamed the keys).
+#  - datasets>=2.20 exposes datasets.config (used by stable_pretraining).
+#  - pyarrow==20 keeps PyExtensionType available.
+#  - huggingface_hub<1 works cleanly with transformers 4.x.
+uv pip install --python "$PY" --upgrade --reinstall \
+  'transformers<5.0.0' 'datasets>=2.20.0,<3.0.0' 'pyarrow==20.0.0' \
+  'huggingface_hub>=0.34.0,<1.0.0' hf_xet
+
 # ensure CUDA torch in the venv
 if ! "$PY" -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
   uv pip install --python "$PY" torch torchvision --index-url https://download.pytorch.org/whl/cu124
