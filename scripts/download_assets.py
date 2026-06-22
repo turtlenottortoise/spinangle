@@ -47,13 +47,15 @@ def fetch_data(bench):
     local = hf_hub_download(repo_id=a["ds_repo"], filename=a["ds_file"],
                             repo_type="dataset", local_dir=dst)
     local = Path(local)
+    subprocess.run("which zstd || (apt-get -qq update && apt-get -qq install -y zstd)",
+                   shell=True)
     if a["kind"] == "zst":
         out = local.with_suffix("")            # strip .zst -> .h5
         print(f"[data] zstd -d -> {out}")
-        subprocess.run(["zstd", "-d", "-f", "-o", str(out), str(local)], check=True)
+        subprocess.run(f"zstd -d -f -o '{out}' '{local}'", shell=True, check=True)
     else:
-        print(f"[data] tar --zstd -x -> {dst}")
-        subprocess.run(["tar", "--zstd", "-xf", str(local), "-C", str(dst)], check=True)
+        print(f"[data] tar -I zstd -x -> {dst}")   # -I zstd is more portable than --zstd
+        subprocess.run(f"tar -I zstd -xf '{local}' -C '{dst}'", shell=True, check=True)
     print(f"[data] done. contents of {dst}:")
     subprocess.run(["ls", "-la", str(dst)])
 
