@@ -100,5 +100,11 @@ def lejepa_forward(self, batch, stage, cfg):
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items()
                    if ("loss" in k or "norm" in k)}
+    # ---- mechanism probes (gate g, realized step-angle psi) if the predictor
+    # exposes them: tests the react-vs-drift / sparse-event predictions ----
+    probe = getattr(getattr(self.model, "predictor", None), "probe", None)
+    if probe:
+        for k, v in probe.items():
+            losses_dict[f"{stage}/probe_{k}"] = torch.as_tensor(v)
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
     return output

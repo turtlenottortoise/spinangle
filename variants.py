@@ -95,6 +95,7 @@ class SphericalARPredictor(nn.Module):
         alpha=1.0,
         gate_dim="channel",          # "channel" (per-dim) or "scalar"
         gate_bias_init=0.0,          # init bias of gate head (0 -> g~0.5)
+        anchor_beta=0.0,             # recurrent-anchor residual weight (0 = off)
         update_mlp=True,             # append a pred_proj-shaped MLP to U for capacity match
         update_mlp_hidden=2048,
         # ---- ARPredictor backbone kwargs (same names as module.ARPredictor) ----
@@ -115,6 +116,10 @@ class SphericalARPredictor(nn.Module):
         self.mode = mode
         self.alpha = float(alpha)
         self.gate_dim = gate_dim
+        self.anchor_beta = float(anchor_beta)
+        # probe buffer (scalar diagnostics, filled each forward; read by the
+        # training objective / offline eval to test the mechanism predictions).
+        self.probe = {}
         D = output_dim or input_dim
         self.dim = D
         # action-embedding dimension feeding the gate heads (defaults to D, which
@@ -154,27 +159,53 @@ class SphericalARPredictor(nn.Module):
             nn.init.zeros_(self.write.weight)
             nn.init.constant_(self.write.bias, -2.0)  # sigmoid(-2) ~ 0.12
 
+    def _anchor(self, x):
+        # Recurrent-anchor residual: pull each step toward the oldest state in the
+        # current window (x[:, :1]). Over an autoregressive rollout this anchors to
+        # the trailing reference HS steps back -- a horizon-axis value-residual. The
+        # planner-level GOAL anchor (anchor = goal_emb) is the deeper variant; see
+        # RESEARCH_NOTES.md ("recurrent anchor").
+        return x[:, :1].expand_as(x) if self.anchor_beta > 0 else 0.0
+
     def forward(self, x, c):
         # x: (B, T, D) current unit state h_t ; c: (B, T, A) action embedding a_t
         u_raw = self.update_net(x, c)
         u_raw = self.update_mlp(u_raw)
         u = l2norm(u_raw)
+        anchor = self._anchor(x)
+        b = self.anchor_beta
 
         if self.mode == "simple":
-            return u
+            h_pred = u if b == 0 else l2norm(u + b * anchor)
+        elif self.mode == "residual":
+            h_pred = l2norm(x + self.alpha * u + b * anchor)
+        elif self.mode == "gated":
+            g = torch.sigmoid(self.gate(torch.cat([x, c], dim=-1)))
+            h_pred = l2norm((1.0 - g) * x + g * u + b * anchor)
+            self._stash_gate(g)
+        else:  # ssm
+            keep = torch.sigmoid(self.keep(torch.cat([x, c], dim=-1)))
+            write = torch.sigmoid(self.write(torch.cat([x, c], dim=-1)))
+            h_pred = l2norm(keep * x + write * u + b * anchor)
+            self._stash_gate(write, keep=keep)
 
-        if self.mode == "residual":
-            return l2norm(x + self.alpha * u)
+        self._stash_step(x, h_pred)
+        return h_pred
 
-        gc = torch.cat([x, c], dim=-1)
-        if self.mode == "gated":
-            g = torch.sigmoid(self.gate(gc))
-            return l2norm((1.0 - g) * x + g * u)
+    @torch.no_grad()
+    def _stash_gate(self, g, keep=None):
+        self.probe["gate_mean"] = g.mean().item()
+        self.probe["gate_std"] = g.std().item()
+        # fraction of "active" updates -- tests the sparse-event prediction
+        self.probe["gate_frac_active"] = (g > 0.5).float().mean().item()
+        if keep is not None:
+            self.probe["keep_mean"] = keep.mean().item()
 
-        # ssm
-        keep = torch.sigmoid(self.keep(gc))
-        write = torch.sigmoid(self.write(gc))
-        return l2norm(keep * x + write * u)
+    @torch.no_grad()
+    def _stash_step(self, x, h_pred):
+        # realized per-step angle psi_t = arccos(<h_t, h_pred>) in radians
+        cos = (l2norm(x) * h_pred).sum(-1).clamp(-1 + 1e-6, 1 - 1e-6)
+        self.probe["step_angle_mean"] = cos.arccos().mean().item()
 
 
 class SIGRegProjector(nn.Module):

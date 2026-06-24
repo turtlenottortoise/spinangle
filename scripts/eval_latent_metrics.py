@@ -26,9 +26,13 @@ from omegaconf import OmegaConf, open_dict
 
 import stable_pretraining as spt  # noqa: F401  (registers backbones used by ckpt)
 import stable_worldmodel as swm
+import torch.nn.functional as F
+from pathlib import Path
 
 import metrics as M
 from utils import get_column_normalizer, get_img_preprocessor
+
+ROOT_RESULTS = Path(__file__).resolve().parent.parent / "results"
 
 
 def load_data(data_name, history, horizon, img_size, frameskip=5, batch_size=16):
@@ -65,7 +69,7 @@ def rollout_latents(model, pixels, actions, history, horizon):
     act_emb = model.action_encoder(actions)            # (B, H+K, D)
 
     HS = history
-    preds = []
+    preds, gates = [], []
     cur = emb
     for k in range(horizon):
         a = act_emb[:, : history + k]
@@ -74,10 +78,12 @@ def rollout_latents(model, pixels, actions, history, horizon):
         p = model.predict(e_trunc, a_trunc)[:, -1:]    # (B, 1, D)
         preds.append(p)
         cur = torch.cat([cur, p], dim=1)
+        probe = getattr(getattr(model, "predictor", None), "probe", {}) or {}
+        gates.append(probe.get("gate_mean", float("nan")))   # mechanism probe
     pred = torch.cat(preds, dim=1)                     # (B, K, D)
 
     true = model.encode({"pixels": pixels, "action": actions})["emb"][:, history:]
-    return pred, true[:, :horizon]
+    return pred, true[:, :horizon], gates
 
 
 @torch.no_grad()
@@ -104,13 +110,14 @@ def main():
     loader = load_data(args.data, args.history, args.horizon, args.img_size,
                        batch_size=args.batch_size)
 
-    all_pred, all_true, all_h, all_state = [], [], [], []
+    all_pred, all_true, all_h, all_state, all_gates = [], [], [], [], []
     for i, batch in enumerate(loader):
         if i >= args.num_batches:
             break
         pixels = batch["pixels"].float().to(device)
         actions = torch.nan_to_num(batch["action"].float(), 0.0).to(device)
-        pred, true = rollout_latents(model, pixels, actions, args.history, args.horizon)
+        pred, true, gates = rollout_latents(model, pixels, actions, args.history, args.horizon)
+        all_gates.append(gates)
         all_pred.append(pred.cpu())
         all_true.append(true.cpu())
         all_h.append(true.reshape(-1, true.size(-1)).cpu())
@@ -125,6 +132,32 @@ def main():
     H = torch.cat(all_h)                  # (N*K, D) encoded latents
 
     sph = args.spherical
+    # ---- per-step mechanism curves: r_eff(k), step-angle(k), gate(k), err(k) ----
+    # These are the plots the theory lives on (r_eff-vs-horizon inverted-U;
+    # gate-vs-step sparse-event spikes; angular drift accumulation).
+    import csv as _csv
+    import numpy as _np
+    gate_curve = _np.nanmean(_np.array(all_gates, dtype=float), axis=0) \
+        if all_gates and len(all_gates[0]) else None
+    per_step_path = ROOT_RESULTS / "per_step_metrics.csv"
+    new = not per_step_path.exists()
+    with per_step_path.open("a", newline="") as f:
+        w = _csv.writer(f)
+        if new:
+            w.writerow(["variant", "benchmark", "step", "roll_err",
+                        "eff_rank", "clumping", "step_angle", "gate_mean"])
+        for k in range(pred.size(1)):
+            cloud = pred[:, k]
+            if k == 0:
+                ang = 0.0
+            else:
+                a = F.normalize(pred[:, k - 1], dim=-1); b = F.normalize(pred[:, k], dim=-1)
+                ang = (a * b).sum(-1).clamp(-1 + 1e-6, 1 - 1e-6).arccos().mean().item()
+            err = M.rollout_errors(pred, true, horizons=(k + 1,), spherical=sph).get(k + 1)
+            gate = float(gate_curve[k]) if gate_curve is not None else ""
+            w.writerow([args.variant, args.benchmark, k + 1, err,
+                        M.effective_rank(cloud), M.mean_pairwise_cosine(cloud), ang, gate])
+    print(f"wrote per-step curves -> {per_step_path}")
     re = M.rollout_errors(pred, true, horizons=(1, 5, 10, 20), spherical=sph)
     # future-state retrieval: predicted final latent must retrieve the true final
     fut = M.retrieval_metrics(pred[:, -1], true[:, -1])

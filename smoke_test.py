@@ -78,9 +78,10 @@ def make_ar_predictor():
                        dropout=0.0, emb_dropout=0.0)
 
 
-def make_spherical_predictor(mode):
+def make_spherical_predictor(mode, anchor_beta=0.0):
     return SphericalARPredictor(
-        mode=mode, alpha=1.0, gate_dim="channel", update_mlp=True, update_mlp_hidden=32,
+        mode=mode, alpha=1.0, gate_dim="channel", anchor_beta=anchor_beta,
+        update_mlp=True, update_mlp_hidden=32,
         num_frames=HISTORY, depth=DEPTH, heads=HEADS, mlp_dim=MLP_DIM,
         input_dim=D, hidden_dim=D, output_dim=D, dim_head=DIM_HEAD, act_dim=D,
     )
@@ -234,6 +235,17 @@ def main():
         run_variant(label,
                     build_jepa(make_spherical_predictor(mode), True, None),
                     make_cfg("cosine", "none", 0.0), expect_unit=True)
+
+    # recurrent-anchor residual on the gated predictor
+    anchor_jepa = build_jepa(make_spherical_predictor("gated", anchor_beta=0.1), True, None)
+    run_variant("gated_spherical_anchor (beta=0.1)",
+                anchor_jepa, make_cfg("cosine", "none", 0.0), expect_unit=True)
+    probe = anchor_jepa.predictor.probe
+    assert "gate_mean" in probe and "step_angle_mean" in probe, \
+        f"predictor probe not populated: {probe}"
+    assert 0.0 <= probe["gate_mean"] <= 1.0, f"gate out of range: {probe['gate_mean']}"
+    print(f"  ok  predictor probe populated: gate_mean={probe['gate_mean']:.3f} "
+          f"step_angle={probe['step_angle_mean']:.3f} frac_active={probe['gate_frac_active']:.3f}")
 
     # F + memory NCE (H)
     run_variant("gated_spherical_memory (H)",

@@ -1,0 +1,22 @@
+# @package _global_
+# Research direction: recurrent-anchor residual on the gated spherical predictor.
+#   h_pred = normalize((1-g)*h_t + g*u + beta*anchor)
+# The anchor is the oldest state in the predictor window (a horizon-axis
+# value-residual). beta sweeps the anchor strength. The deeper planner-level GOAL
+# anchor (anchor = goal_emb) is described in RESEARCH_NOTES.md. Pair with cosine loss.
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_spherical_anchor
+
+model:
+  predictor:
+    anchor_beta: 0.1     # sweep: 0.0 (=gated_spherical), 0.05, 0.1, 0.25
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: false
+  sigreg:
+    weight: 0.0
+    target: none

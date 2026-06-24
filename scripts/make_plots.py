@@ -127,6 +127,48 @@ def plot_rank_clumping(rows):
     print(f"  wrote plots/rank_clumping.png{'' if any_pts else '  (placeholder)'}")
 
 
+def plot_mechanism_curves():
+    """Per-step mechanism curves from results/per_step_metrics.csv: gate g(k),
+    effective rank r_eff(k), and step-angle psi(k) vs rollout step. These are the
+    plots the nGPT-JEPA mechanism predictions live on (gate sparsity at events,
+    r_eff inverted-U, bounded angular drift)."""
+    psv = ROOT / "results" / "per_step_metrics.csv"
+    if not psv.exists():
+        return
+    with psv.open() as f:
+        rows = list(csv.DictReader(f))
+    if not rows:
+        return
+    panels = [("gate_mean", "gate g(k)"), ("eff_rank", "effective rank(k)"),
+              ("step_angle", "step angle ψ(k) [rad]")]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
+    by_var = defaultdict(list)
+    for r in rows:
+        by_var[r.get("variant", "?")].append(r)
+    for ax, (key, ylabel) in zip(axes, panels):
+        any_pts = False
+        for variant, rs in sorted(by_var.items()):
+            pts = [(fnum(r, "step"), fnum(r, key)) for r in rs]
+            pts = [(x, y) for x, y in pts if x is not None and y is not None]
+            if not pts:
+                continue
+            pts.sort()
+            xs, ys = zip(*pts)
+            ax.plot(xs, ys, marker=".", label=variant)
+            any_pts = True
+        if any_pts:
+            ax.legend(fontsize=7)
+        else:
+            _empty(ax)
+        ax.set(xlabel="rollout step k", ylabel=ylabel)
+        ax.grid(alpha=0.3)
+    fig.suptitle("nGPT-JEPA mechanism curves")
+    fig.tight_layout()
+    fig.savefig(PLOTS / "mechanism_curves.png", dpi=120)
+    plt.close(fig)
+    print("  wrote plots/mechanism_curves.png")
+
+
 def main():
     PLOTS.mkdir(exist_ok=True)
     rows = load_rows()
@@ -142,6 +184,7 @@ def main():
     plot_xy(rows, "plan_samples", "success",
             "Planning-budget curve", "number of sampled plans (CEM)", "success rate",
             "planning_budget_curve.png", sort=True)
+    plot_mechanism_curves()
 
 
 if __name__ == "__main__":
