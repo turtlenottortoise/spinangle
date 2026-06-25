@@ -29,23 +29,36 @@ Riemannian gradient descent on Sᵈ⁻¹.** In an LM the softmax + learned logit
 `s` reinject magnitude and *decode the sphere away*, so the constraint is a gauge `s`
 compensates for. JEPA has no such decode — the sphere is the objective.
 
-## 2. SIGReg on z vs on h — a scale-mismatch theorem
+## 2. SIGReg on z vs on h — a scale-mismatch (well-posedness) result
 
 Take `h` uniform on the unit sphere. A random 1-D projection `w·h` has variance
-`wᵀE[hhᵀ]w = 1/d`. SIGReg (Epps–Pulley vs **standard** normal) targets variance **1**.
-So SIGReg-on-h sees the projections as ~`d×` too concentrated and pushes to inflate
-per-direction variance — but the only way unit vectors raise `Var(w·h)` toward 1 is to
-**cluster along axes** (max is 1, at full collapse `h=±w`). 
+`wᵀE[hhᵀ]w = 1/d`, and the hard cap `tr(Cov) ≤ 1` bounds the *total* variance budget
+over all `d` directions at 1. SIGReg (Epps–Pulley vs **standard** normal) targets
+per-direction variance **1** → off by a factor `d`, and **unsatisfiable** for unit
+vectors. Trace the gradient: SIGReg pushes to widen the projections (`|h_i·a_j|↑`);
+summed over random `a_j` the dominant component is **radial** (`+h_i`, inflate the
+norm), which `normalize` then projects out.
 
-> **SIGReg applied directly to unit-norm `h` is not merely wasteful — it is
-> collapse-*inducing* (scale-broken): it rewards the anisotropy it was meant to
-> prevent.** Predicts ablation #13 (direct SIGReg on h) *hurts*, not just no-ops.
+> **SIGReg directly on unit-norm `h` is ill-posed and *inert*, not collapse-inducing**
+> (earlier note overstated this). Its useful gradient is radial and the sphere deletes
+> it; the weak tangential residual is, if anything, mildly anti-collapse. Corrected
+> prediction for ablation #13: it behaves like **≈ no regularizer** (collapses like the
+> no-reg variant F), while projector-SIGReg(z) actually prevents collapse — so "#13
+> hurts" only *relative to G*.
 
-The fix is the projector. `z = W h` with `‖W‖ ~ √d` rescales unit `h` (per-dir var
-`1/d`) to the Gaussian shell (per-dir var `1`, `‖z‖≈√d`), making the Epps–Pulley test
-well-posed. **The projector's job is precisely the chart `Sᵈ⁻¹ → ℝᵈ` that fixes the
-`1/d → 1` variance gap.** This is the mathematical justification for variant G and the
-sharpest single result in the harness.
+The fix is the projector. `z = Wh` with `‖W‖ ~ √d` **amplifies** the unit shell
+(per-dir var `1/d`) to the Gaussian shell (per-dir var `~1`, `‖z‖≈√d`), so the
+projections genuinely *can* be `N(0,1)`: the gradient is no longer a wasted radial term
+and does real isotropic shaping in z, which backprops (`Wᵀ∂L/∂z`) to spread `h`
+angularly. (The sphere image is intrinsically `(d−1)`-dim so `z` can't be a *perfect*
+Gaussian, but in high `d` the missing dimension is negligible for the projection test —
+the **scale**, not the dimension, is the fix.)
+
+**Design fork this exposes.** Two principled regularizers: (1) project + standard
+SIGReg(z) [current variant G]; (2) keep `h` but target the **uniform-sphere** law
+`N(0, 1/d)` (or standardize projections first) — a scale-free "sphere-native SIGReg"
+that needs no projector. Ablation (1) vs (2): if (2) matches G, the projector is just
+rescaling; if G wins, the projector's extra capacity is doing real work.
 
 ## 3. DINO vs LeWM — anti-collapse as a moment-order spectrum
 
@@ -159,7 +172,8 @@ predicts (long-horizon, sparse-event), not uniformly.
 
 **Contributions.**
 1. The recurrent-latent principle (§0) — a structural site LMs lack.
-2. Riemannian-GD identity (§1) and the SIGReg-on-h scale-mismatch theorem (§2).
+2. Riemannian-GD identity (§1) and the SIGReg-on-h scale-mismatch / well-posedness
+   result + the sphere-native-SIGReg fork (§2).
 3. Anti-collapse moment-order spectrum unifying DINO and LeWM (§3); the interior
    isotropy optimum.
 4. The gate as the unique solver of react-vs-drift for sparse-event dynamics (§4),
@@ -174,7 +188,7 @@ gated-spherical winning on Two-Room/long-horizon but tying on Push-T short-horiz
 
 **Decision rules (unchanged).** Better retrieval/rank alone = representation win, not
 a world-model win. Report negatives (simple-spherical collapse, direct-SIGReg-on-h
-harm) — they are *predicted* and strengthen the mechanism story.
+behaving like no-reg) — they are *predicted* and strengthen the mechanism story.
 
 ## References
 - Loshchilov et al. (2025), *nGPT*, ICLR 2025, arXiv:2410.01131.
