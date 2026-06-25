@@ -1,0 +1,18 @@
+# @package _global_
+# Tests the DINO-vs-LeWM prediction: stop-grad on the target matters MORE once the
+# latent is normalized (normalization removes the radial DOF SIGReg used, so the
+# anti-collapse burden falls on the weaker angular channel; a stop-grad target the
+# predictor chases -- without it chasing back -- should resist collapse better).
+# Gated spherical, cosine loss, NO distributional reg, target detached.
+defaults:
+  - override /model: gated_spherical
+
+output_model_name: gated_spherical_stopgrad
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: true     # <- the ablation knob (vs gated_spherical = false)
+  sigreg:
+    weight: 0.0
+    target: none
