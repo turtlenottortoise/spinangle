@@ -80,20 +80,33 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-name", required=True,
-                    help="output_model_name used at train time, e.g. tworoom/official_lewm_l4_single")
-    ap.add_argument("--epoch", type=int, required=True, help="which weights_epoch_N.pt to finalize")
+                    help="output_model_name used at train time, e.g. tworoom/official_lewm_l4_single_run")
+    ap.add_argument("--epoch", default="auto",
+                    help="which weights_epoch_N.pt to finalize; 'auto' = newest by mtime")
+    ap.add_argument("--out-name", default=None,
+                    help="canonical name to write (default: --run-name), "
+                         "e.g. tworoom/official_lewm_l4_single")
     ap.add_argument("--experiment", default=None, help="experiment name (fallback rebuild)")
     ap.add_argument("--data", default=None, help="data config name (fallback rebuild)")
     args = ap.parse_args()
 
     ckpt_root = Path(swm.data.utils.get_cache_dir(sub_folder="checkpoints"))
     run_dir = ckpt_root / args.run_name
-    w_path = run_dir / f"weights_epoch_{args.epoch}.pt"
+    out_name = args.out_name or args.run_name
     cfg_path = run_dir / "config.json"
+
+    if str(args.epoch).lower() == "auto":
+        cands = sorted(run_dir.glob("weights_epoch_*.pt"), key=lambda p: p.stat().st_mtime)
+        if not cands:
+            sys.exit(f"[finalize] FATAL: no weights_epoch_*.pt in {run_dir}")
+        w_path = cands[-1]
+        print(f"[finalize] --epoch auto -> newest: {w_path.name}")
+    else:
+        w_path = run_dir / f"weights_epoch_{int(args.epoch)}.pt"
 
     if not w_path.exists():
         sys.exit(f"[finalize] FATAL: weights not found: {w_path}\n"
-                 f"           (restore weights_epoch_{args.epoch}.pt from Drive first)")
+                 f"           (restore the weights from Drive first)")
     print(f"[finalize] weights : {w_path}  ({w_path.stat().st_size/1e6:.1f} MB)")
     print(f"[finalize] config  : {cfg_path}  ({'present' if cfg_path.exists() else 'MISSING'})")
 
@@ -140,20 +153,20 @@ def main():
                      "Aborting rather than saving a corrupt checkpoint.")
 
     model.eval()
-    canon = ckpt_root / f"{args.run_name}.pt"
+    canon = ckpt_root / f"{out_name}.pt"
     canon.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model, canon)
     print(f"[finalize] wrote canonical object: {canon}  ({canon.stat().st_size/1e6:.1f} MB)")
 
-    # marker so it's obvious this run was finalized from an earlier epoch (honest, no faked epoch file)
+    # marker so it's obvious which export this canonical checkpoint came from
     (run_dir / "FINALIZED.json").write_text(json.dumps(
-        {"finalized_from_epoch": args.epoch, "canonical_ckpt": str(canon),
-         "run_name": args.run_name}, indent=2))
+        {"finalized_from": w_path.name, "canonical_ckpt": str(canon),
+         "run_name": args.run_name, "out_name": out_name}, indent=2))
 
     # verify round-trip through the package's own loader (what eval_latent_metrics uses)
-    m2 = swm.wm.utils.load_pretrained(args.run_name)
+    m2 = swm.wm.utils.load_pretrained(out_name)
     n_params = sum(p.numel() for p in m2.parameters())
-    print(f"[finalize] load_pretrained('{args.run_name}') OK -> {type(m2).__name__}, "
+    print(f"[finalize] load_pretrained('{out_name}') OK -> {type(m2).__name__}, "
           f"{n_params/1e6:.2f}M params")
     print("[finalize] DONE")
 
