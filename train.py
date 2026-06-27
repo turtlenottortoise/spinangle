@@ -54,6 +54,29 @@ def run(cfg):
 
     world_model = hydra.utils.instantiate(cfg.model)
 
+    # Optional warm-start from a bare state_dict export (cfg.init_weights), e.g. to
+    # finish an interrupted run from its last `weights_epoch_N.pt` when the full
+    # Lightning checkpoint is gone. This loads weights only (fresh optimizer), so it
+    # is a continuation, not an exact resume. Skipped when a full Lightning checkpoint
+    # resume is available (that path restores weights+optimizer+epoch and takes
+    # precedence); see ckpt_path below.
+    _run_id = cfg.get("subdir") or ""
+    _resume_ckpt = Path(swm.data.utils.get_cache_dir(sub_folder="checkpoints"),
+                        _run_id) / f"{cfg.output_model_name}_weights.ckpt"
+    if cfg.get("init_weights") and not _resume_ckpt.exists():
+        blob = torch.load(cfg.init_weights, map_location="cpu", weights_only=False)
+        if isinstance(blob, torch.nn.Module):
+            blob = blob.state_dict()
+        if isinstance(blob, dict) and "state_dict" in blob:
+            blob = blob["state_dict"]
+        missing, unexpected = world_model.load_state_dict(blob, strict=False)
+        print(f"[init_weights] loaded {cfg.init_weights}: "
+              f"missing={len(missing)} unexpected={len(unexpected)}", flush=True)
+        assert not missing and not unexpected, \
+            "init_weights does not match the model architecture (config drift)"
+    elif cfg.get("init_weights"):
+        print(f"[init_weights] skipped -- resuming from {_resume_ckpt}", flush=True)
+
     # Optimizer / scheduler spec.
     # Default reproduces official LeWM exactly: one AdamW group over `model` with a
     # LinearWarmupCosineAnnealingLR schedule. Phase-7 (nGPT/νGPT) overrides:
