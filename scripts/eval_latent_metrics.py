@@ -127,6 +127,14 @@ def main():
                                  .reshape(-1, batch[key].size(-1)).float())
                 break
 
+    if not all_pred:
+        import sys
+        sys.exit(
+            f"[eval] FATAL: the rollout loader yielded 0 usable batches for "
+            f"--data {args.data} at history={args.history} horizon={args.horizon} "
+            f"(needs episodes >= {(args.history + args.horizon)} strided frames). "
+            f"Lower --horizon (e.g. 10) and/or --history and retry."
+        )
     pred = torch.cat(all_pred)            # (N, K, D)
     true = torch.cat(all_true)            # (N, K, D)
     H = torch.cat(all_h)                  # (N*K, D) encoded latents
