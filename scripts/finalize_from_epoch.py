@@ -60,10 +60,15 @@ def _build_from_experiment(experiment: str, data: str, input_dim):
     ``${embed_dim}`` / ``${img_size}`` resolve. ``input_dim`` (the action-encoder
     Conv1d in-channels) is normally recovered from the weights by the caller; if it
     is None we fall back to reading it from the dataset (train.py's logic)."""
-    from hydra import compose, initialize
+    from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
 
-    # config_path is relative to THIS file (scripts/), so ../config/train resolves.
-    with initialize(version_base=None, config_path="../config/train"):
+    # Something we imported may already have initialized Hydra's global singleton;
+    # clear it so init doesn't raise "GlobalHydra is already initialized". Use an
+    # absolute config dir (initialize_config_dir) to avoid relative-path ambiguity.
+    cfg_dir = str(Path(__file__).resolve().parent.parent / "config" / "train")
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(version_base=None, config_dir=cfg_dir):
         c = compose(config_name="lewm",
                     overrides=[f"+experiment={experiment}", f"data={data}"])
     if input_dim is None:
@@ -74,6 +79,37 @@ def _build_from_experiment(experiment: str, data: str, input_dim):
     OmegaConf.set_struct(c, False)
     c.model.action_encoder.input_dim = int(input_dim)
     return hydra.utils.instantiate(c.model), c.model
+
+
+def _build_manual(experiment: str, input_dim):
+    """Hydra-compose-free rebuild: load the base + experiment + model YAMLs with
+    OmegaConf, supply the top-level interpolation vars (${embed_dim} etc.), and
+    instantiate. ``hydra.utils.instantiate`` does not need Hydra's global init, so
+    this path avoids initialize()/compose entirely."""
+    root = Path(__file__).resolve().parent.parent / "config" / "train"
+    base = OmegaConf.load(root / "lewm.yaml")
+    model_name = "lewm"
+    exp_path = root / "experiment" / f"{experiment}.yaml"
+    exp = OmegaConf.load(exp_path) if exp_path.exists() else OmegaConf.create({})
+    for d in (exp.get("defaults", []) or []):
+        if isinstance(d, (dict,)) or hasattr(d, "items"):
+            for k, v in dict(d).items():
+                if "model" in str(k):
+                    model_name = str(v)
+    model_cfg = OmegaConf.load(root / "model" / f"{model_name}.yaml")
+    if "model" in exp:                       # experiment-level model overrides, if any
+        model_cfg = OmegaConf.merge(model_cfg, exp.model)
+    ctx = OmegaConf.create({
+        "embed_dim": base.get("embed_dim", 192),
+        "img_size": base.get("img_size", 224),
+        "history_size": base.get("history_size", 3),
+        "num_preds": base.get("num_preds", 1),
+        "model": model_cfg,
+    })
+    OmegaConf.set_struct(ctx, False)
+    if input_dim is not None:
+        ctx.model.action_encoder.input_dim = int(input_dim)
+    return hydra.utils.instantiate(ctx.model), ctx.model
 
 
 def _action_input_dim(state):
@@ -144,7 +180,17 @@ def main():
                 errs.append(f"experiment: {e!r}")
                 print(f"[finalize] experiment rebuild failed: {e!r}")
                 traceback.print_exc()
-        # Fallback: the saved config.json (only if it carries _target_s + resolved values).
+        # Fallback A: hydra-free build straight from the YAML configs.
+        if model is None and args.experiment:
+            try:
+                model, _ = _build_manual(args.experiment, input_dim)
+                print(f"[finalize] rebuilt via manual YAML build (experiment={args.experiment})")
+            except Exception as e:
+                import traceback
+                errs.append(f"manual: {e!r}")
+                print(f"[finalize] manual rebuild failed: {e!r}")
+                traceback.print_exc()
+        # Fallback B: the saved config.json (only if it carries _target_s + resolved values).
         if model is None and cfg_path.exists():
             try:
                 model, _ = _build_from_config_json(cfg_path)
