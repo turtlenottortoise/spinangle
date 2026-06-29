@@ -1,0 +1,35 @@
+# @package _global_
+# Hardened gated-spherical contender for the single matched-compute run vs official
+# LeWM. Plain gated_spherical (variant F) COLLAPSED: no regularizer + no stop-grad ->
+# trivial constant-latent solution (pred_loss ~1e-8, step-angle ~0, gate frac_active 0).
+# This config stacks the two anti-collapse mechanisms our ablation discussion judged
+# strongest and complementary ON THE SPHERE, while staying matched to LeWM on weight:
+#
+#   * spherical h + gated LERP predictor          -> the mechanism under test
+#   * cosine / angular prediction loss
+#   * STOP-GRAD target                            -> SimSiam/DINO asymmetry. RESEARCH_NOTES
+#       sec.3: stop-grad matters MORE on the sphere (normalization removes the radial DOF
+#       SIGReg used), so the online predictor chases a DETACHED target instead of the
+#       pred and target co-collapsing into a constant (exactly F's failure mode).
+#   * SIGReg on a PROJECTED Gaussian z = Projector(h), weight 0.09 (matched to LeWM).
+#       SIGReg directly on unit-norm h is ill-posed/inert (sec.2) -> regularize z, not h.
+#
+# EMA target is deliberately omitted: it is the one mechanism needing new, GPU-untested
+# code in this harness; stop-grad already supplies the asymmetry. EMA is the first
+# upgrade for run #2 if this run shows the gate doing real work.
+defaults:
+  - override /model: gated_spherical_projector_sigreg
+
+output_model_name: gated_spherical_hardened
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: true       # <- the collapse fix F lacked
+  sigreg:
+    weight: 0.09                 # matched to official LeWM
+    target: projector_z          # SIGReg on Gaussian z (not the unit-sphere h)
+  anticollapse:
+    weight: 0.0                  # two strong anti-collapse mechanisms already; avoid the isotropy inverted-U
+  memory:
+    weight: 0.0
