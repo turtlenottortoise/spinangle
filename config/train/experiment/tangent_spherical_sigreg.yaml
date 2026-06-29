@@ -1,0 +1,29 @@
+# @package _global_
+# ADOPTED single-run contender vs official LeWM. A learned TANGENT-SPACE step on the
+# unit hypersphere with a gated scalar step size, plus the same anti-collapse stack as
+# the hardened gated variant:
+#   * spherical h + tangent-space Riemannian step  -> cleaner than the LERP: the update
+#       is projected into the tangent plane at h (no wasted radial DOF), direction is a
+#       unit tangent vector, and alpha = sigmoid(Step(h,a)) is the step-size GATE (the
+#       react-vs-drift mechanism survives, as a scalar step size).
+#   * cosine / angular prediction loss
+#   * STOP-GRAD target (SimSiam/DINO asymmetry; matters more on the sphere, sec.3)
+#   * SIGReg on projected Gaussian z = Projector(h), weight matched to LeWM (0.09)
+# NB: the LERP (gated) update is the faithful nGPT update; this tangent step is the
+# Riemannian variant -- better conditioned for spherical dynamics (see RESEARCH_NOTES sec.1).
+defaults:
+  - override /model: tangent_spherical_sigreg
+
+output_model_name: tangent_spherical_sigreg
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: true
+  sigreg:
+    weight: 0.09
+    target: projector_z
+  anticollapse:
+    weight: 0.0
+  memory:
+    weight: 0.0

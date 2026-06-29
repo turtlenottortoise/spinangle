@@ -263,6 +263,18 @@ def main():
                            sigreg_projector=SIGRegProjector(D, 32, D)),
                 make_cfg("cosine", "projector_z", 0.09), expect_unit=True)
 
+    # tangent_spherical_sigreg: Riemannian tangent-space step + projector SIGReg on z
+    # (the adopted single-run contender). Verifies the new tangent mode forwards, stays
+    # on the sphere, and produces a non-frozen step.
+    tan_jepa = build_jepa(make_spherical_predictor("tangent"), True, None,
+                          sigreg_projector=SIGRegProjector(D, 32, D))
+    run_variant("tangent_spherical_sigreg (tangent + z-SIGReg)",
+                tan_jepa, make_cfg("cosine", "projector_z", 0.09), expect_unit=True)
+    tp = tan_jepa.predictor.probe
+    assert tp["step_angle_mean"] > 0.05, f"tangent step looks frozen: {tp['step_angle_mean']}"
+    print(f"  ok  tangent probe: gate_mean={tp['gate_mean']:.3f} "
+          f"step_angle={tp['step_angle_mean']:.3f} frac_active={tp['gate_frac_active']:.3f}")
+
     # ablation #13: direct SIGReg on h
     run_variant("gated_direct_sigreg_h (#13)",
                 build_jepa(make_spherical_predictor("gated"), True, None),

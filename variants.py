@@ -80,13 +80,18 @@ class SphericalARPredictor(nn.Module):
                        h_pred = normalize((1 - g) * h_t + g * u)
       - ``ssm``      : keep = sigmoid(K(h_t, a_t)); write = sigmoid(W(h_t, a_t));
                        h_pred = normalize(keep * h_t + write * normalize(U))
+      - ``tangent``  : d = U - (U.h_t)h_t (tangent projection); d = normalize(d);
+                       alpha = sigmoid(Step(h_t, a_t)) (scalar gate);
+                       h_pred = normalize(h_t + alpha * d)  -- Riemannian step; the
+                       direction is a pure unit tangent vector and alpha is the gate,
+                       so no capacity is spent on the radial DOF normalize() deletes.
 
     The gate / keep / write heads are functions of (h_t, a_t) as specified in the
     brief (NOT of the candidate u), so the model decides *how far* to move along
     the sphere from the current state before seeing the proposed endpoint.
     """
 
-    VALID_MODES = ("simple", "residual", "gated", "ssm")
+    VALID_MODES = ("simple", "residual", "gated", "ssm", "tangent")
 
     def __init__(
         self,
@@ -150,6 +155,13 @@ class SphericalARPredictor(nn.Module):
             self.gate = nn.Linear(D + A, gate_out)
             nn.init.zeros_(self.gate.weight)
             nn.init.constant_(self.gate.bias, gate_bias_init)
+        elif mode == "tangent":
+            # Step size alpha MUST be a scalar per token: a per-channel alpha would
+            # warp the tangent vector so alpha*delta is no longer orthogonal to h,
+            # reintroducing the wasted radial component normalize() deletes.
+            self.gate = nn.Linear(D + A, 1)
+            nn.init.zeros_(self.gate.weight)
+            nn.init.constant_(self.gate.bias, gate_bias_init)
         elif mode == "ssm":
             self.keep = nn.Linear(D + A, gate_out)
             self.write = nn.Linear(D + A, gate_out)
@@ -183,6 +195,17 @@ class SphericalARPredictor(nn.Module):
             g = torch.sigmoid(self.gate(torch.cat([x, c], dim=-1)))
             h_pred = l2norm((1.0 - g) * x + g * u + b * anchor)
             self._stash_gate(g)
+        elif self.mode == "tangent":
+            # Learned tangent-space step (Riemannian retraction): project the update
+            # into the tangent plane at h, take a unit direction, step by a learned
+            # (gated) SCALAR size alpha. Unlike the LERP, this never spends capacity on
+            # the radial direction that normalize() removes; alpha is the step gate.
+            xn = l2norm(x)
+            delta = u_raw - (u_raw * xn).sum(-1, keepdim=True) * xn   # remove radial part
+            delta = l2norm(delta)                                     # unit tangent dir
+            alpha = torch.sigmoid(self.gate(torch.cat([x, c], dim=-1)))   # (B, T, 1)
+            h_pred = l2norm(xn + alpha * delta + b * anchor)
+            self._stash_gate(alpha)
         else:  # ssm
             keep = torch.sigmoid(self.keep(torch.cat([x, c], dim=-1)))
             write = torch.sigmoid(self.write(torch.cat([x, c], dim=-1)))
