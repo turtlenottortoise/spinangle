@@ -54,26 +54,35 @@ def _build_from_config_json(cfg_path: Path):
     return model, cfg_model
 
 
-def _build_from_experiment(experiment: str, data: str, input_dim, cache_dir):
-    """Fallback: rebuild via the experiment config like train.py. Needs the action
-    input_dim (taken from config.json if present, else computed from the dataset)."""
+def _build_from_experiment(experiment: str, data: str, input_dim):
+    """Rebuild via the full experiment config exactly like train.py. Composing the
+    *full* config (not just cfg.model) is what lets interpolations such as
+    ``${embed_dim}`` / ``${img_size}`` resolve. ``input_dim`` (the action-encoder
+    Conv1d in-channels) is normally recovered from the weights by the caller; if it
+    is None we fall back to reading it from the dataset (train.py's logic)."""
     from hydra import compose, initialize
 
-    repo = Path(__file__).resolve().parent.parent
-    rel = Path("..") / repo.name / "config" / "train"  # initialize wants a relative path
-    # initialize() is finicky about relative paths; use config_path relative to this file.
+    # config_path is relative to THIS file (scripts/), so ../config/train resolves.
     with initialize(version_base=None, config_path="../config/train"):
         c = compose(config_name="lewm",
                     overrides=[f"+experiment={experiment}", f"data={data}"])
     if input_dim is None:
-        # last resort: load the dataset to read the action dimension (train.py logic)
         dcfg = OmegaConf.to_container(c.data.dataset, resolve=True)
         name = dcfg.pop("name")
-        ds = swm.data.load_dataset(name, transform=None, cache_dir=cache_dir, **dcfg)
+        ds = swm.data.load_dataset(name, transform=None, **dcfg)
         input_dim = int(c.data.dataset.frameskip * ds.get_dim("action"))
     OmegaConf.set_struct(c, False)
     c.model.action_encoder.input_dim = int(input_dim)
     return hydra.utils.instantiate(c.model), c.model
+
+
+def _action_input_dim(state):
+    """Recover the action-encoder input dim straight from the weights: Embedder's
+    first layer is Conv1d(input_dim, ...) so its weight is [out, input_dim, 1]."""
+    for k in ("action_encoder.patch_embed.weight", "model.action_encoder.patch_embed.weight"):
+        if k in state:
+            return int(state[k].shape[1])
+    return None
 
 
 def main():
@@ -119,28 +128,33 @@ def main():
         state = blob.get("state_dict", blob) if isinstance(blob, dict) else blob
         n_keys = len(state) if hasattr(state, "__len__") else "?"
         print(f"[finalize] file is a state_dict ({n_keys} tensors) -> rebuilding architecture")
-        cache_dir = None
-        input_dim = None
+        input_dim = _action_input_dim(state)
+        print(f"[finalize] action input_dim from weights: {input_dim}")
         model = None
-        if cfg_path.exists():
+        errs = []
+        # Primary: compose the full experiment config (resolves ${...} interpolations)
+        # and patch input_dim from the weights -- no dataset / config.json needed.
+        if args.experiment and args.data:
             try:
-                model, cfg_used = _build_from_config_json(cfg_path)
-                input_dim = OmegaConf.select(cfg_used, "action_encoder.input_dim")
-                print("[finalize] rebuilt via hydra.instantiate(config.json)")
+                model, _ = _build_from_experiment(args.experiment, args.data, input_dim)
+                print(f"[finalize] rebuilt via experiment config "
+                      f"(+experiment={args.experiment} data={args.data})")
             except Exception as e:
-                print(f"[finalize] instantiate(config.json) failed ({e!r}); trying experiment config")
-                try:
-                    input_dim = int(OmegaConf.select(
-                        OmegaConf.create(json.loads(cfg_path.read_text())),
-                        "action_encoder.input_dim"))
-                except Exception:
-                    input_dim = None
+                import traceback
+                errs.append(f"experiment: {e!r}")
+                print(f"[finalize] experiment rebuild failed: {e!r}")
+                traceback.print_exc()
+        # Fallback: the saved config.json (only if it carries _target_s + resolved values).
+        if model is None and cfg_path.exists():
+            try:
+                model, _ = _build_from_config_json(cfg_path)
+                print("[finalize] rebuilt via config.json")
+            except Exception as e:
+                errs.append(f"config.json: {e!r}")
+                print(f"[finalize] config.json rebuild failed: {e!r}")
         if model is None:
-            if not args.experiment or not args.data:
-                sys.exit("[finalize] FATAL: cannot rebuild -- pass --experiment and --data, "
-                         "or restore config.json next to the weights.")
-            model, _ = _build_from_experiment(args.experiment, args.data, input_dim, cache_dir)
-            print("[finalize] rebuilt via composed experiment config")
+            sys.exit("[finalize] FATAL: could not rebuild the model.\n  " + "\n  ".join(errs)
+                     + "\n  (pass --experiment and --data, or restore config.json.)")
 
         missing, unexpected = model.load_state_dict(state, strict=False)
         print(f"[finalize] load_state_dict: missing={len(missing)} unexpected={len(unexpected)}")
