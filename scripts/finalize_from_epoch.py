@@ -26,6 +26,7 @@ python scripts/finalize_from_epoch.py \
 """
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -198,32 +199,32 @@ def main():
             except Exception as e:
                 errs.append(f"config.json: {e!r}")
                 print(f"[finalize] config.json rebuild failed: {e!r}")
+        # Architecture rebuild is only a SANITY check now (the canonical folder below
+        # uses the original config.json, and load_pretrained is the real gate), so a
+        # rebuild failure is a warning, not fatal.
         if model is None:
-            sys.exit("[finalize] FATAL: could not rebuild the model.\n  " + "\n  ".join(errs)
-                     + "\n  (pass --experiment and --data, or restore config.json.)")
+            print("[finalize] WARN: architecture sanity-rebuild unavailable:\n  " + "\n  ".join(errs))
+        else:
+            missing, unexpected = model.load_state_dict(state, strict=False)
+            print(f"[finalize] sanity load_state_dict: missing={len(missing)} unexpected={len(unexpected)}")
+            if missing or unexpected:
+                print("           (mismatch -> WARN only; load_pretrained below is the real gate)")
 
-        missing, unexpected = model.load_state_dict(state, strict=False)
-        print(f"[finalize] load_state_dict: missing={len(missing)} unexpected={len(unexpected)}")
-        if missing:
-            print("           missing[:8]   :", list(missing)[:8])
-        if unexpected:
-            print("           unexpected[:8]:", list(unexpected)[:8])
-        if missing or unexpected:
-            sys.exit("[finalize] FATAL: state_dict does not match architecture (config drift). "
-                     "Aborting rather than saving a corrupt checkpoint.")
+    # load_pretrained resolves a FOLDER <ckpt_root>/<out_name>/ containing one .pt +
+    # config.json (the native save_pretrained layout), NOT a bare <out_name>.pt file.
+    canon_dir = ckpt_root / out_name
+    canon_dir.mkdir(parents=True, exist_ok=True)
+    for old in canon_dir.glob("*.pt"):          # keep exactly one .pt -> unambiguous
+        old.unlink()
+    shutil.copy2(w_path, canon_dir / w_path.name)
+    if cfg_path.exists():
+        shutil.copy2(cfg_path, canon_dir / "config.json")
+    print(f"[finalize] wrote canonical folder: {canon_dir}  "
+          f"({w_path.name} + {'config.json' if cfg_path.exists() else 'NO config.json!'})")
+    (canon_dir / "FINALIZED.json").write_text(json.dumps(
+        {"finalized_from": str(w_path), "run_name": args.run_name, "out_name": out_name}, indent=2))
 
-    model.eval()
-    canon = ckpt_root / f"{out_name}.pt"
-    canon.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(model, canon)
-    print(f"[finalize] wrote canonical object: {canon}  ({canon.stat().st_size/1e6:.1f} MB)")
-
-    # marker so it's obvious which export this canonical checkpoint came from
-    (run_dir / "FINALIZED.json").write_text(json.dumps(
-        {"finalized_from": w_path.name, "canonical_ckpt": str(canon),
-         "run_name": args.run_name, "out_name": out_name}, indent=2))
-
-    # verify round-trip through the package's own loader (what eval_latent_metrics uses)
+    # verify round-trip through the package's own loader (exactly what eval uses)
     m2 = swm.wm.utils.load_pretrained(out_name)
     n_params = sum(p.numel() for p in m2.parameters())
     print(f"[finalize] load_pretrained('{out_name}') OK -> {type(m2).__name__}, "
