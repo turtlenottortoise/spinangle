@@ -177,7 +177,7 @@ def main():
 
     out = {
         "variant": args.variant, "benchmark": args.benchmark, "phase": "latent",
-        "seed": args.seed, "ckpt_path": args.policy, "spherical": int(sph),
+        "seed": args.seed, "ckpt_path": args.policy,
         "roll_err_1": re.get(1), "roll_err_5": re.get(5),
         "roll_err_10": re.get(10), "roll_err_20": re.get(20),
         "rollout_drift": M.rollout_drift(pred, true, spherical=sph),
@@ -192,20 +192,35 @@ def main():
         S = torch.cat(all_state)
         # discretize continuous state into bins for a kNN probe sanity signal
         labels = (S[:, 0] > S[:, 0].median()).long() if S.size(1) else None
-        if labels is not None:
+        if labels is not None and H.size(0) > 5:      # topk(k=5) needs N > 5
             out["knn_probe"] = M.knn_probe(H, labels)
 
     print("== latent metrics ==")
     for k, v in out.items():
         print(f"  {k}: {v}")
 
-    # append to results/all_runs.csv via the shared logger
-    from log_run import main as log_main
-    argv = []
-    for k, v in out.items():
-        if v is not None:
-            argv += [f"--{k}", str(v)]
-    log_main(argv)
+    # robust self-contained sink: always persist `out` as JSON so the head-to-head
+    # table never depends on the (fragile) log_run argparse round-trip.
+    import json
+    sink = ROOT_RESULTS / f"latent_{args.variant}_{args.benchmark}.json"
+    sink.write_text(json.dumps(out, indent=2))
+    print(f"wrote latent metrics -> {sink}", flush=True)
+
+    # also append to results/all_runs.csv via the shared logger (best-effort: a
+    # logging failure must never lose the metrics we just computed).
+    try:
+        from log_run import main as log_main
+        argv = []
+        for k, v in out.items():
+            if v is not None:
+                argv += [f"--{k}", str(v)]
+        log_main(argv)
+    except SystemExit as e:
+        print(f"[eval] WARN: log_run rejected the row (exit {e.code}); "
+              f"metrics are safe in {sink}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[eval] WARN: log_run failed ({e!r}); metrics are safe in {sink}",
+              flush=True)
 
 
 if __name__ == "__main__":
