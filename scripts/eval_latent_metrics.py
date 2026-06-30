@@ -21,7 +21,8 @@ from functools import partial
 
 import hydra
 import torch
-from hydra import compose, initialize
+from hydra import compose, initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
 
 import stable_pretraining as spt  # noqa: F401  (registers backbones used by ckpt)
@@ -38,7 +39,9 @@ ROOT_RESULTS = Path(__file__).resolve().parent.parent / "results"
 def load_data(data_name, history, horizon, img_size, frameskip=5, batch_size=16):
     """Load the eval dataset with sequences long enough for the rollout horizon,
     using the same transforms as train.py."""
-    with initialize(version_base=None, config_path="../config/train"):
+    cfg_dir = str(Path(__file__).resolve().parent.parent / "config" / "train")
+    GlobalHydra.instance().clear()   # an imported pkg may have initialized Hydra already
+    with initialize_config_dir(version_base=None, config_dir=cfg_dir):
         cfg = compose(config_name="lewm", overrides=[f"data={data_name}"])
     dcfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     name = dcfg.pop("name")
