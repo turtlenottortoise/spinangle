@@ -97,6 +97,48 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
     CONTEXT ONLY — never give the predictor access to target-encoder features
     (copy shortcut ⇒ identity collapse; we have met this failure personally).
 
+## B3. Architecture toy results — contact world (`scripts/cpu_arch_bench.py`)
+
+Two-body toy mirroring Push-T: pusher (action-driven) + block that moves ONLY
+on contact (sparse events), block weakly observable. All variants share the
+contender recipe (cosine + stop-grad + simplex proto). 3 seeds:
+
+| mode      | roll10 | retr@1 | R²push | R²block | params |
+|-----------|--------|--------|--------|---------|--------|
+| tangent   | .404   | **.099** | **.343** | .030  | 8.6k |
+| mono_rot  | .049   | .878   | .138   | −.109   | 9.1k |
+| prod_rot  | **.041** | .862 | .178   | −.120   | 9.2k |
+| tied3     | .066   | .859   | .228   | −.012   | 9.1k |
+| untied3   | .055   | .893   | .142   | .032    | 27.3k |
+| mem_rot   | .059   | .859   | .182   | −.101   | 14.9k |
+
+Verdicts on the three ideas:
+- **Product-of-spheres (idea 1): weak-positive.** Best rollout (−16% vs mono)
+  at matched params; keep as the spherical-patch design for the Push-T retrain
+  (real spatial structure; a 2-patch toy can't show more).
+- **Depth=time tying (idea 2): benefit regime untested.** Depth added nothing
+  here — the toy's true dynamics ARE one rotation, so extra steps are
+  unnecessary by construction. Tying ≈ untied at 1/3 params (efficiency
+  confirmed). Needs composition-demanding dynamics to test properly. Parked.
+- **Memory residual (idea 3): negative at toy scale.** No gain anywhere; the
+  bottleneck is not access to history (see finding below). Superseded by
+  objective-level fixes (#8 grounding, contact-weighted losses).
+
+Two NEW findings (both strengthen the paper story):
+- **The objective blind spot.** EVERY architecture discards the contact-driven
+  block (R²_block ≤ .03 across the board; step sizes uncorrelated with true
+  contact). The cosine-JEPA loss barely rewards encoding a body that moves
+  rarely and weakly — architecture cannot rescue what the objective does not
+  value. Sparse-event information loss is an OBJECTIVE-level problem →
+  grounding/contact-weighted losses (#8) outrank any architecture tweak.
+- **Probes anti-correlate with rollout competence, third instance.** tangent
+  posts the best state-probe R² (.343) and the worst rollout/retrieval
+  (.404/.099) — same inversion as TwoRoom retrieval-vs-planning and toy-1
+  act_frac. Also: tangent is BRITTLE across settings (retr .857→.099 between
+  bench configs) while rotation cores were stable in every configuration
+  tested. (v1 of this bench had an unnormalized-cosine metric bug for the
+  product latent; v2 numbers above are authoritative.)
+
 ## B2. Tiering — production-grade vs publishable (2026-07-06)
 
 **Production-grade today** (deploy, no research bet):
