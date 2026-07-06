@@ -17,11 +17,21 @@ nothing at scale, per decision rule #7).
 | mmd_energy (determ.)| .684  | .804   | .038  | their follow-up's winner LOSES at toy scale |
 | h2 moments          | .652  | .775   | .014  | spreads but doesn't structure |
 | codesphere (random) | .729  | .788   | .086  | random prototypes — fails rule #1 |
-| **codesphere_etf**  | **.781** | .815 | .016 | **cross-polytope prototypes: best pure method, deterministic, 0 hyperparams** |
+| codesphere_etf      | .781  | .815   | .016  | cross-polytope (K=2d), deterministic |
+| **codesphere_simplex** | **.782** | .810 | .017 | **simplex ETF (K=d+1): ties cross with half the prototypes, best eff-rank (26.0) of the family** |
+| codesphere_ms       | .782  | .812   | .042  | coarse simplex + fine tight-frame bank; flat at toy scale (10 classes — no hierarchy to exploit; real-scale question) |
 | local_density       | .575  | .767   | .464  | diagnostic only (rule #3 confirmed) |
-| infonce (τ=0.2)     | .812  | .847   | .006  | wins, but heuristic (negatives + temperature) |
+| infonce (τ=0.2)     | .812  | .847   | .006  | wins among singles, but heuristic (negatives + temperature) |
 | vmf_mle (κ by MLE)  | .704  | .800   | .192  | naive de-heuristicized NCE FAILS: κ≈150 ≫ κ(τ=.2)≈5 |
 | codesphere+weak nce | .815  | .840   | .038  | combos ≈ infonce; NCE does the lifting |
+| **codesphere_simplex+nce** | **.819** | .837 | .027 | **best overall: optimal prototypes + weak discriminative** |
+| codesphere_ms+nce   | .817  | .843   | .032  | second overall |
+
+Honesty notes: 3 seeds ⇒ ±~0.01 noise, top-of-family differences are ties;
+CodeSphere is *not* zero-knob (Sinkhorn assignment τ=0.1 and λ remain) — its
+claim is theorem-fixed TARGET + deterministic gradients, not zero parameters.
+The whole ETF family (.781–.782) sits above every continuous-density
+regularizer, sliced or deterministic.
 
 Gradient-noise microtest: sliced methods rel-noise 1.3–2.2 (noise > signal);
 all deterministic methods exactly 0. Their follow-up's motivation reproduces.
@@ -79,6 +89,35 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
     flow). Collapse-safety rule: any new attention connection must flow from
     CONTEXT ONLY — never give the predictor access to target-encoder features
     (copy shortcut ⇒ identity collapse; we have met this failure personally).
+
+## B2. Tiering — production-grade vs publishable (2026-07-06)
+
+**Production-grade today** (deploy, no research bet):
+- **Retargeted SIGReg** (`target N(0,1/d)` on normalized embeddings): one-line
+  change, +3.4 kNN at proxy scale, zero new machinery.
+- **Simplex-prototype regularizer** (`codesphere_simplex`): deterministic
+  gradients, K=d+1 (tiny, O(BdD)), theorem-fixed target. Most industrial
+  application: **VQ codebook dead-code prevention for speech/audio codecs**
+  (regularize/init codebooks toward tight frames).
+- **H2 mean-penalty as a collapse alarm**: ‖mean(z)‖² is a cap detector — a
+  monitoring rail for any embedding pipeline, not a paper.
+- **Gradient-noise microtest as CI** for regularizer implementations.
+
+**Publishable on top of SPHERE-JEPA** (contingent on real-scale runs):
+1. *Finite beats continuous*: regularize toward universally optimal finite
+   configurations (simplex/cross-polytope/tight frames), not continuous
+   densities. Theory: Cohn–Kumar + Benedetto–Fickus + neural-collapse ETF;
+   critique: Diaconis–Freedman + the marginal hole (.575–.815 kNN at matched
+   uniformity). Their-turf paper.
+2. *Uniformity–robustness tradeoff*: topology/Lipschitz argument with a cheap
+   testable prediction (λ_uniformity ↑ ⇒ robustness ↓). Standalone.
+3. *SO(d) dynamics* (flagship, collaboration paper): transitions in the
+   sphere's symmetry group — rollout collapse impossible by measure
+   preservation; + our probes≠planning and transition-collapse findings as
+   motivation. Implementation path: Cayley transform (I−A/2)⁻¹(I+A/2) or
+   low-rank skew A = UVᵀ−VUᵀ (O(dk)) instead of full matrix-exp.
+4. (Parked) full-mixture-likelihood contrastive — naive vMF-MLE failed;
+   κ-from-joint is the open thread.
 
 ## C. Tomorrow's real-scale queue
 

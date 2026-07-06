@@ -117,16 +117,42 @@ def reg_h2(z, g=None):
     return mu.pow(2).sum() + (cov - torch.eye(d) / d).pow(2).sum()
 
 
+def _rand_rot(gg):
+    Q, _ = torch.linalg.qr(torch.randn(D_Z, D_Z, generator=gg))
+    return Q
+
+
+def make_protos(mode, seed):
+    """Theorem-backed prototype banks on S^{d-1}.
+
+    cross   : rotated cross-polytope {+-e_i}, K=2d  (universally optimal, Cohn-Kumar)
+    simplex : rotated regular simplex, K=d+1, pairwise cos = -1/d
+              (neural-collapse ETF; universally optimal)
+    union4  : union of 4 rotated orthonormal bases, K=4d -- a unit-norm tight
+              frame, i.e. a global minimizer of the frame potential
+              (Benedetto-Fickus); the principled *fine* bank.
+    random  : iid Gaussian normalized (the naive baseline).
+    """
+    gg = torch.Generator().manual_seed(seed)
+    if mode == "cross":
+        Q = _rand_rot(gg)
+        return torch.cat([Q, -Q], dim=0)
+    if mode == "simplex":
+        K = D_Z + 1
+        M = torch.eye(K) - torch.full((K, K), 1.0 / K)   # rows span a d-dim subspace
+        _, _, Vt = torch.linalg.svd(M)
+        C = F.normalize(M @ Vt[:D_Z].t(), dim=-1)        # (d+1, d), cos = -1/d
+        off = C @ C.t() - torch.eye(K)
+        assert off.abs().max() - 1.0 / D_Z < 1e-4        # verify ETF geometry
+        return C @ _rand_rot(gg)
+    if mode == "union4":
+        return torch.cat([_rand_rot(gg) for _ in range(4)], dim=0)
+    return F.normalize(torch.randn(64, D_Z, generator=gg), dim=-1)
+
+
 class CodeSphere:
-    def __init__(self, K=64, tau=0.1, seed=0, etf=False):
-        gg = torch.Generator().manual_seed(seed)
-        if etf:
-            # cross-polytope {±e_i}: universally optimal K=2d configuration
-            # (Cohn-Kumar), randomly rotated -- a provably optimal prototype set.
-            Q, _ = torch.linalg.qr(torch.randn(D_Z, D_Z, generator=gg))
-            self.C = torch.cat([Q, -Q], dim=0)
-        else:
-            self.C = F.normalize(torch.randn(K, D_Z, generator=gg), dim=-1)
+    def __init__(self, mode="random", seed=0, tau=0.1):
+        self.C = make_protos(mode, seed)
         self.tau = tau
 
     def __call__(self, z, g=None):
@@ -137,6 +163,17 @@ class CodeSphere:
                 Q = Q / Q.sum(0, keepdim=True)
                 Q = Q / Q.sum(1, keepdim=True)
         return -(Q * sim).sum(1).mean()
+
+
+class MultiCodeSphere:
+    """Multi-scale: coarse semantic bank (simplex, K=d+1) + fine tight-frame
+    bank (union of rotated orthobases, K=4d), equal weights."""
+    def __init__(self, seed=0):
+        self.coarse = CodeSphere("simplex", seed)
+        self.fine = CodeSphere("union4", seed + 1)
+
+    def __call__(self, z, g=None):
+        return 0.5 * self.coarse(z) + 0.5 * self.fine(z)
 
 
 def reg_local_density(z, g=None, k=3, eps=1e-3):
@@ -173,15 +210,23 @@ REGS = {
     "local_density": (reg_local_density,                   [1.0, 4.0]),
     "infonce":       (None,                                [1.0]),        # replaces pred+reg
     "vmf_mle":       (None,                                [1.0]),        # temp-free NCE
-    "codesphere_etf": (None,                               [1.0, 4.0]),   # optimal prototypes
+    "codesphere_etf":     (None,                           [1.0, 4.0]),   # cross-polytope
+    "codesphere_simplex": (None,                           [1.0, 4.0]),   # neural-collapse ETF
+    "codesphere_ms":      (None,                           [1.0, 4.0]),   # coarse+fine banks
 }
+
+# prototype construction per codesphere variant
+PROTO_MODE = {"codesphere": "random", "codesphere_etf": "cross",
+              "codesphere_simplex": "simplex"}
 
 # combos: pred loss + lam*Reg + 0.25*InfoNCE (uniformity + weak discriminative)
 COMBOS = {
-    "susreg+nce":        [4.0, 16.0],
-    "sigreg_1overd+nce": [4.0, 16.0],
-    "mmd_energy+nce":    [0.25, 1.0],
-    "codesphere+nce":    [1.0, 4.0],
+    "susreg+nce":          [4.0, 16.0],
+    "sigreg_1overd+nce":   [4.0, 16.0],
+    "mmd_energy+nce":      [0.25, 1.0],
+    "codesphere+nce":      [1.0, 4.0],
+    "codesphere_simplex+nce": [1.0, 4.0],
+    "codesphere_ms+nce":   [1.0, 4.0],
 }
 
 
@@ -214,10 +259,10 @@ def run_one(method, lam, seed):
     opt = torch.optim.Adam(enc.parameters(), lr=3e-3)
     base = method[:-4] if method.endswith("+nce") else method
     reg_fn = REGS[base][0]
-    if base == "codesphere":
-        cs = CodeSphere(seed=seed); reg_fn = cs
-    elif base == "codesphere_etf":
-        cs = CodeSphere(seed=seed, etf=True); reg_fn = cs
+    if base in PROTO_MODE:
+        reg_fn = CodeSphere(PROTO_MODE[base], seed=seed)
+    elif base == "codesphere_ms":
+        reg_fn = MultiCodeSphere(seed=seed)
     for step in range(STEPS):
         idx = torch.randint(0, N_TRAIN, (BATCH,), generator=g)
         v1, v2 = views(xtr[idx], g)
@@ -247,7 +292,7 @@ def grad_noise():
                  "codesphere", "local_density"]:
         fn = REGS[name][0]
         if name == "codesphere":
-            cs = CodeSphere(seed=0); fn = cs
+            fn = CodeSphere("random", seed=0)
         grads = []
         for rep in range(20):
             g = torch.Generator().manual_seed(1000 + rep)   # resample projections
