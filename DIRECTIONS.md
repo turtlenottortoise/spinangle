@@ -182,6 +182,42 @@ Two NEW findings (both strengthen the paper story):
 4. (Parked) full-mixture-likelihood contrastive — naive vMF-MLE failed;
    κ-from-joint is the open thread.
 
+## B4. Tokenizer / VQ-codebook finding (`scripts/cpu_vq_codebook_bench.py`)
+
+Spherical VQ autoencoder, K=256 codes on S^15, 96 true data modes. Two regimes
+expose that **codebook occupancy and continuous-marginal uniformity are
+different axes**:
+
+REGIME A (end-to-end, encoder co-collapses; vanilla z_clump 0.997):
+  marginal regs HELP occupancy by spreading z — sigreg_h 219/256, simplex_h 79.
+REGIME B (frozen encoder, z fixed & spread at clump 0.61; = the speech setup):
+  vanilla 51, ema 44, **sigreg_h 51, simplex_h 51 (identical to vanilla)**,
+  entropy 51, **sinkhorn 232, reinit 223**.
+
+Taxonomy of anti-collapse mechanisms (the real result):
+- act on the continuous embedding z (SIGReg/SUSReg/MMD/simplex, AND a
+  usage-entropy penalty routed through softmax(z·C)): help occupancy ONLY to
+  the extent the collapse is *encoder-driven*. When z is already spread
+  (codebook-side death) they are literal no-ops. This is Leonard's speech
+  finding, now with a mechanism.
+- act on the discrete assignment / codebook geometry directly (Sinkhorn/
+  balanced assignment, dead-code reinit): fix occupancy in BOTH regimes
+  (4–4.5× here). This is why "Sph-KL helped" in the speech run — it anchors on
+  the codebook, i.e. it is secretly a codebook-side method (halfway to
+  CodeSphere), not a marginal method.
+- DIAGNOSTIC: measure z_clump / |mean| of the *pre-quant* embedding. Low clump
+  + dead codes ⇒ codebook-side ⇒ only assignment/reinit help. High clump ⇒
+  encoder-driven ⇒ spreading z (marginal reg) also helps.
+- CAVEAT (honesty): the usage-entropy no-op is specific to the frozen-encoder
+  isolation (it backprops only into the frozen encoder). With a trainable
+  encoder it becomes an encoder-reshaping method (Regime-A-like). Sinkhorn/
+  reinit are the only mechanisms that work regardless.
+Publishable line for the Borelli group: "representation uniformity regularizers
+do not transfer to discrete tokenizer collapse; occupancy is an
+assignment-histogram problem." Product: a drop-in Sinkhorn-balanced spherical
+VQ (their KL, made codebook-anchored) for speech/audio codecs.
+NOTE: only finding #1 of the user's three is captured here; #2/#3 pending.
+
 ## C. Tomorrow's real-scale queue
 
 1. Static SSL small-real test (their currency, one L4/A100 session): READY —
