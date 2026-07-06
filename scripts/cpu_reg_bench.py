@@ -118,9 +118,15 @@ def reg_h2(z, g=None):
 
 
 class CodeSphere:
-    def __init__(self, K=64, tau=0.1, seed=0):
+    def __init__(self, K=64, tau=0.1, seed=0, etf=False):
         gg = torch.Generator().manual_seed(seed)
-        self.C = F.normalize(torch.randn(K, D_Z, generator=gg), dim=-1)
+        if etf:
+            # cross-polytope {±e_i}: universally optimal K=2d configuration
+            # (Cohn-Kumar), randomly rotated -- a provably optimal prototype set.
+            Q, _ = torch.linalg.qr(torch.randn(D_Z, D_Z, generator=gg))
+            self.C = torch.cat([Q, -Q], dim=0)
+        else:
+            self.C = F.normalize(torch.randn(K, D_Z, generator=gg), dim=-1)
         self.tau = tau
 
     def __call__(self, z, g=None):
@@ -146,6 +152,16 @@ def loss_infonce(z1, z2, tau=0.2):
     return F.cross_entropy(logits, torch.arange(B))
 
 
+def loss_vmf_mle(z1, z2):
+    """Temperature-free contrastive: conditional likelihood of a vMF mixture.
+    kappa is not a hyperparameter -- it is the closed-form Banerjee et al. (2005)
+    MLE estimate from the positives' mean resultant, recomputed each batch."""
+    r = (z1 * z2).sum(-1).mean().clamp(0.05, 0.995).detach()
+    kappa = r * (z1.size(1) - r ** 2) / (1.0 - r ** 2)
+    logits = kappa * (z1 @ z2.t())
+    return F.cross_entropy(logits, torch.arange(z1.size(0)))
+
+
 REGS = {
     "none":          (lambda z, g: z.sum() * 0.0,          [0.0]),
     "sigreg":        (lambda z, g: reg_sigreg(z, g, 1.0),  [1.0, 4.0]),
@@ -156,6 +172,8 @@ REGS = {
     "codesphere":    (None,                                [1.0, 4.0]),   # built per-run
     "local_density": (reg_local_density,                   [1.0, 4.0]),
     "infonce":       (None,                                [1.0]),        # replaces pred+reg
+    "vmf_mle":       (None,                                [1.0]),        # temp-free NCE
+    "codesphere_etf": (None,                               [1.0, 4.0]),   # optimal prototypes
 }
 
 # combos: pred loss + lam*Reg + 0.25*InfoNCE (uniformity + weak discriminative)
@@ -198,12 +216,16 @@ def run_one(method, lam, seed):
     reg_fn = REGS[base][0]
     if base == "codesphere":
         cs = CodeSphere(seed=seed); reg_fn = cs
+    elif base == "codesphere_etf":
+        cs = CodeSphere(seed=seed, etf=True); reg_fn = cs
     for step in range(STEPS):
         idx = torch.randint(0, N_TRAIN, (BATCH,), generator=g)
         v1, v2 = views(xtr[idx], g)
         z1, z2 = enc(v1), enc(v2)
         if method == "infonce":
             loss = loss_infonce(z1, z2)
+        elif method == "vmf_mle":
+            loss = loss_vmf_mle(F.normalize(enc.pred(z1), dim=-1), z2.detach())
         else:
             p1 = F.normalize(enc.pred(z1), dim=-1)
             pred = 1.0 - (p1 * z2.detach()).sum(-1).mean()
