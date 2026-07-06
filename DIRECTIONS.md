@@ -45,10 +45,12 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
    regularizer deterministically with zero free parameters. Next: simplex-ETF
    banks, multi-scale (coarse semantic / fine instance), learned-rotation-only
    prototypes. → REAL-SCALE TEST #1.
-2. **Diaconis–Freedman critique (theory, untested writeup).** Almost all 1-D
-   projections of any high-d dataset look Gaussian ⇒ sliced tests (SIGReg AND
-   SUSReg) provably lose power with d. Frame as the reason deterministic/finite
-   methods are needed; their follow-up half-concedes without naming it.
+2. **Diaconis–Freedman critique (DEMONSTRATED, `cpu_paper_tests.py` T1).**
+   Uniform-on-half-subsphere (measure zero, projection variance exactly 1/d):
+   sliced SUSReg-style discrimination z-score collapses 150→46→13→**3.5** as
+   d goes 8→512 (n=2048, R=64), while the H2 moment/frame statistic stays flat
+   at ~1400σ. Sliced tests provably and now measurably go blind with dimension;
+   moment/finite-configuration statistics do not.
 3. **The marginal hole (our sharpest critique, empirically shown).** Their
    minimax theorem constrains p(z) only; encoders with identical uniform
    marginals span .575–.815 kNN in our bench. Uniformity is nearly free and not
@@ -57,10 +59,14 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
    vmf_mle showed the NCE temperature is NOT the positives' vMF concentration.
    Correct version = full mixture likelihood (κ from joint fit, not positives'
    resultant). Do not oversell; park until A1 lands.
-5. **Uniformity–robustness tradeoff (unclaimed paper).** Intrinsic dim k ≪ d−1
-   ⇒ encoder image is measure-zero on S^{d−1}; exact uniformity unattainable;
-   pushing uniformity beyond Lipschitz resolution must inflate the Lipschitz
-   constant. Testable: uniformity weight ↑ ⇒ robustness ↓.
+5. **Uniformity–robustness tradeoff (CONFIRMED at toy scale, with a KNEE —
+   `cpu_paper_tests.py` T2).** k=4 manifold in R^64, sweeping simplex-reg λ:
+   λ 0→32 drives |mean| 0.65→0.10 and clump 0.43→0.01, but empirical Lipschitz
+   inflates **12×** (0.054→0.62) and the clean-vs-noisy kNN gap **4×**
+   (0.058→0.224) while clean acc barely moves. Sharper than predicted: there
+   is a KNEE — λ=0.5 buys most of the uniformity at zero Lipschitz cost;
+   λ≥2 crosses the manifold's resolution and pays. "Resolution-limited vs
+   pathological regime" is the paper's figure 1.
 
 ## B. World-model directions (our turf)
 
@@ -79,6 +85,14 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
    θ-gradient-at-identity check and exact-unit-norm planner rollouts.
    Honest cost: rotations preserve information; contractive correction is the
    known follow-up. → THE next contender training run.
+   Parameterization truths measured (`cpu_paper_tests.py` T3, random nontrivial
+   weights): gradient norm through a T-step rollout is DEAD by T=16 for
+   simple/gated/tangent (0.000–0.015 rel.) and conserved for rotation (1.16 at
+   T=16, 1.86 at T=64 — uRNN property); pairwise-angle distortion after 32
+   steps: rotation 0.12 vs 0.72–0.91 (6–7× better structure preservation);
+   Cayley low-rank skew (Woodbury, d=192, k=8): orthogonal to 1e-7, pairwise
+   cosines to 3e-8, **0.18 ms/step for B=256 on CPU** — cheap enough for
+   real-time control loops without a GPU.
 7. **SUSReg directly on h** (drop the projector loophole behind the TwoRoom
    cap): implement as sigreg with target N(0,1/d) on normalized h (~30 lines in
    objective.py). Pairs with memory-NCE (already in code).
@@ -170,9 +184,12 @@ Two NEW findings (both strengthen the paper story):
 
 ## C. Tomorrow's real-scale queue
 
-1. Static SSL small-real test (their currency, one L4/A100 session):
-   codesphere_etf vs susreg vs sigreg vs mmd_energy on CIFAR-10/STL-10-scale
-   JEPA; metrics: kNN, linear probe, clumping, eff-rank + gradient-noise.
+1. Static SSL small-real test (their currency, one L4/A100 session): READY —
+   `scripts/gpu_cifar_reg_bench.py` (SimSiam-style ResNet-18 on CIFAR-10,
+   none/sigreg/sigreg_1overd/mmd_energy/simplex/simplex_nce; kNN + linear +
+   clumping + NOISY-kNN robustness gap + Lipschitz probe, so it also scale-
+   tests the tradeoff paper). ~17 min/method/40ep on L4 ⇒ ~1.5–2 h total;
+   idempotent per-method JSONs. CPU smoke-tested.
 2. World-model grid (needs matched official Push-T baseline finishing):
    tangent+fixes (8) retrain OR SO(d) contender (6) — pick ONE; SUSReg-on-h (7)
    rides along as the regularizer swap.
