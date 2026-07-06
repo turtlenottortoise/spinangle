@@ -120,16 +120,16 @@ def get_data(root, smoke=False):
 
 
 def augment(x, g):
+    # NB: device-side randomness must NOT use the CPU generator (CUDA errors);
+    # torch.manual_seed in run_method seeds the CUDA RNG for these.
     B = x.size(0)
-    out = x
-    if torch.rand((), generator=g) < 2.0:      # always: random crop via padding
-        pad = F.pad(out, (4, 4, 4, 4), mode="reflect")
-        i = torch.randint(0, 9, (2,), generator=g)
-        out = pad[:, :, i[0]:i[0] + 32, i[1]:i[1] + 32]
-    flip = torch.rand(B, generator=g, device=x.device) < 0.5
+    pad = F.pad(x, (4, 4, 4, 4), mode="reflect")     # random crop (batch-shared)
+    i = torch.randint(0, 9, (2,), generator=g)
+    out = pad[:, :, i[0]:i[0] + 32, i[1]:i[1] + 32]
+    flip = torch.rand(B, device=x.device) < 0.5
     out = torch.where(flip[:, None, None, None], out.flip(-1), out)
     # brightness/contrast jitter (cheap, on-GPU)
-    b = 1 + 0.4 * (torch.rand(B, 1, 1, 1, generator=g, device=x.device) - 0.5)
+    b = 1 + 0.4 * (torch.rand(B, 1, 1, 1, device=x.device) - 0.5)
     m = out.mean(dim=(1, 2, 3), keepdim=True)
     out = ((out - m) * b + m).clamp(0, 1)
     return out
