@@ -64,14 +64,21 @@ all deterministic methods exactly 0. Their follow-up's motivation reproduces.
 
 ## B. World-model directions (our turf)
 
-6. **SO(d) transitions — the "vGPT" (STRONGEST theorem-backed contender).**
-   z_{t+1} = exp(A(a, z_t))·z_t, A skew-symmetric. By construction: uniform
-   marginal preserved under rollout (dynamics cannot collapse), pairwise angles
-   preserved (no rollout clumping — the TwoRoom failure), ‖z‖ ≡ 1 (no drift),
-   invertible (backward planning), unit-circle eigenvalues ⇒ gradient norms
-   preserved over horizon (uRNN truth). Step size = ‖A‖ explicit in the Lie
-   algebra ⇒ gate death is not an attractor. Honest cost: rotations preserve
-   information; add penalized contractive correction. → next contender run.
+6. **SO(d) transitions — the "vGPT" (TOY-VALIDATED, GPU-READY).**
+   z_{t+1} = k exact plane rotations of z_t (planes+angles from heads; raw
+   linear θ, zero-init ⇒ starts AT identity with healthy gradients). Toy test
+   (`scripts/cpu_rotation_bench.py`, reconstructs the Push-T smooth-dynamics
+   collapse regime): **10-step rollout error 3–5× lower than tangent/gated**
+   (.058 vs .195/.273), top future-retrieval (.84), step size tracks true
+   motion (76%). NEW FINDING: gated/tangent training *shrinks true latent
+   motion* (encoder co-adapts to make copying cheap; true step .056–.069 vs
+   rotation's .111–.113) — identity collapse has an **encoder accomplice**;
+   isometric transitions remove the incentive. Wired end-to-end:
+   `+experiment=rotation_spherical_simplex` (mode=rotation predictor,
+   simplex-proto loss on h, cosine+stop-grad); smoke tests pass incl.
+   θ-gradient-at-identity check and exact-unit-norm planner rollouts.
+   Honest cost: rotations preserve information; contractive correction is the
+   known follow-up. → THE next contender training run.
 7. **SUSReg directly on h** (drop the projector loophole behind the TwoRoom
    cap): implement as sigreg with target N(0,1/d) on normalized h (~30 lines in
    objective.py). Pairs with memory-NCE (already in code).
