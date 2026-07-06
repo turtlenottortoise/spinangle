@@ -13,7 +13,7 @@ The official LeWM objective is recovered exactly with the default config
 import torch
 from einops import rearrange
 
-from variants import memory_nce_loss, pairwise_cosine_penalty
+from variants import memory_nce_loss, pairwise_cosine_penalty, simplex_proto_loss
 
 
 def _get(cfg_node, key, default):
@@ -45,6 +45,9 @@ def lejepa_forward(self, batch, stage, cfg):
     mcfg = _get(lcfg, "memory", {})
     mem_w = _get(mcfg, "weight", 0.0)
     mem_temp = _get(mcfg, "temperature", 0.1)
+    prcfg = _get(lcfg, "proto", {})
+    proto_w = _get(prcfg, "weight", 0.0)
+    proto_tau = _get(prcfg, "tau", 0.1)
 
     # Replace NaN values with 0 (occurs at sequence boundaries)
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
@@ -93,6 +96,11 @@ def lejepa_forward(self, batch, stage, cfg):
     if mem_w > 0:
         output["memory_loss"] = memory_nce_loss(pred_emb, tgt_emb, temperature=mem_temp)
         output["loss"] = output["loss"] + mem_w * output["memory_loss"]
+
+    # ---- optional simplex-ETF prototype uniformity (deterministic, on h) ----
+    if proto_w > 0:
+        output["proto_loss"] = simplex_proto_loss(emb, tau=proto_tau)
+        output["loss"] = output["loss"] + proto_w * output["proto_loss"]
 
     # ---- latent-norm diagnostic (tracks collapse / norm drift) ----
     with torch.no_grad():

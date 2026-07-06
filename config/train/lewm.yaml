@@ -57,3 +57,6 @@ loss:
   memory:
     weight: 0.0            # in-batch future/goal NCE retrieval pressure
     temperature: 0.1
+  proto:
+    weight: 0.0            # simplex-ETF prototype uniformity on h (deterministic)
+    tau: 0.1

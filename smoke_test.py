@@ -108,7 +108,7 @@ def fake_batch():
 
 
 def make_cfg(pred_type="mse", sigreg_target="emb", sigreg_weight=0.09,
-             anticollapse_w=0.0, memory_w=0.0, stop_grad=False):
+             anticollapse_w=0.0, memory_w=0.0, stop_grad=False, proto_w=0.0):
     return DotDict({
         "history_size": HISTORY,
         "num_preds": NPRED,
@@ -118,6 +118,7 @@ def make_cfg(pred_type="mse", sigreg_target="emb", sigreg_weight=0.09,
                        "kwargs": {"knots": 9, "num_proj": 64}},
             "anticollapse": {"weight": anticollapse_w},
             "memory": {"weight": memory_w, "temperature": 0.1},
+            "proto": {"weight": proto_w, "tau": 0.1},
         },
     })
 
@@ -280,12 +281,31 @@ def main():
                 build_jepa(make_spherical_predictor("gated"), True, None),
                 make_cfg("cosine", "emb", 0.09), expect_unit=True)
 
+    # rotation_spherical_simplex: SO(d) plane-rotation step + simplex-ETF proto
+    # loss on h. Verifies the three construction guarantees: exact unit norm,
+    # populated step-size probe, and -- the anti-gate-death property -- nonzero
+    # gradient into the theta head AT the identity (theta starts at exactly 0).
+    rot_jepa = build_jepa(make_spherical_predictor("rotation"), True, None)
+    run_variant("rotation_spherical_simplex (SO(d)+proto)",
+                rot_jepa, make_cfg("cosine", "none", 0.0, stop_grad=True,
+                                   proto_w=0.1), expect_unit=True)
+    rp = rot_jepa.predictor.probe
+    assert "gate_mean" in rp, f"rotation probe not populated: {rp}"
+    th_grad = rot_jepa.predictor.rot_theta.weight.grad
+    assert th_grad is not None and th_grad.abs().sum() > 0, \
+        "rotation theta head got NO gradient at the identity -- parameterization dead"
+    print(f"  ok  rotation probe: step_rad={rp['gate_mean']:.4f} (identity start) "
+          f"theta-grad={th_grad.abs().sum():.2e} (healthy at theta=0)")
+
     print("\n== planner rollout / criterion ==")
     test_planner_path("official_lewm",
                       build_jepa(make_ar_predictor(), False, make_projector(True)),
                       expect_unit=False)
     test_planner_path("gated_spherical",
                       build_jepa(make_spherical_predictor("gated"), True, None),
+                      expect_unit=True)
+    test_planner_path("rotation_spherical_simplex",
+                      build_jepa(make_spherical_predictor("rotation"), True, None),
                       expect_unit=True)
 
     print("\n== official loss reference check ==")

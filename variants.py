@@ -91,7 +91,7 @@ class SphericalARPredictor(nn.Module):
     the sphere from the current state before seeing the proposed endpoint.
     """
 
-    VALID_MODES = ("simple", "residual", "gated", "ssm", "tangent")
+    VALID_MODES = ("simple", "residual", "gated", "ssm", "tangent", "rotation")
 
     def __init__(
         self,
@@ -103,6 +103,7 @@ class SphericalARPredictor(nn.Module):
         anchor_beta=0.0,             # recurrent-anchor residual weight (0 = off)
         update_mlp=True,             # append a pred_proj-shaped MLP to U for capacity match
         update_mlp_hidden=2048,
+        rot_k=8,                     # rotation mode: number of learned rotation planes
         # ---- ARPredictor backbone kwargs (same names as module.ARPredictor) ----
         num_frames,
         depth,
@@ -170,6 +171,17 @@ class SphericalARPredictor(nn.Module):
             nn.init.constant_(self.keep.bias, 2.0)   # sigmoid(2) ~ 0.88
             nn.init.zeros_(self.write.weight)
             nn.init.constant_(self.write.bias, -2.0)  # sigmoid(-2) ~ 0.12
+        elif mode == "rotation":
+            # SO(d) step: k exact plane rotations. theta is a RAW linear readout
+            # (no sigmoid): zero-init starts at the identity, where gradients are
+            # healthy (d h'/d theta != 0) -- the parameterization cannot die the
+            # way a saturating gate does. Planes come from a head over the
+            # attention features + action; angles are the explicit step size.
+            self.rot_k = int(rot_k)
+            self.rot_theta = nn.Linear(D + A, self.rot_k)
+            nn.init.zeros_(self.rot_theta.weight)
+            nn.init.zeros_(self.rot_theta.bias)
+            self.rot_planes = nn.Linear(D + A, 2 * self.rot_k * D)
 
     def _anchor(self, x):
         # Recurrent-anchor residual: pull each step toward the oldest state in the
@@ -206,6 +218,26 @@ class SphericalARPredictor(nn.Module):
             alpha = torch.sigmoid(self.gate(torch.cat([x, c], dim=-1)))   # (B, T, 1)
             h_pred = l2norm(xn + alpha * delta + b * anchor)
             self._stash_gate(alpha)
+        elif self.mode == "rotation":
+            # Isometric-by-construction transition: ||h_pred|| == 1 exactly, the
+            # Jacobian in x is orthogonal (rotations compose), and the realized
+            # step size sum|theta_i| is explicit -- rollouts cannot norm-drift
+            # and the identity (theta=0) is a point, not a sigmoid attractor.
+            za = torch.cat([u_raw, c], dim=-1)
+            th = self.rot_theta(za)                                    # (B,T,k)
+            raw = self.rot_planes(za).reshape(*th.shape, 2, self.dim)  # (B,T,k,2,D)
+            out = l2norm(x)
+            for i in range(self.rot_k):
+                p = l2norm(raw[..., i, 0, :])
+                qr = raw[..., i, 1, :]
+                q = l2norm(qr - (qr * p).sum(-1, keepdim=True) * p)    # Gram-Schmidt
+                c1 = (out * p).sum(-1, keepdim=True)
+                c2 = (out * q).sum(-1, keepdim=True)
+                ct = torch.cos(th[..., i:i + 1])
+                st = torch.sin(th[..., i:i + 1])
+                out = out + (ct - 1.0) * (c1 * p + c2 * q) + st * (c1 * q - c2 * p)
+            h_pred = out if b == 0 else l2norm(out + b * anchor)
+            self._stash_gate(th.abs().sum(-1, keepdim=True))           # step size (rad)
         else:  # ssm
             keep = torch.sigmoid(self.keep(torch.cat([x, c], dim=-1)))
             write = torch.sigmoid(self.write(torch.cat([x, c], dim=-1)))
@@ -276,3 +308,41 @@ def pairwise_cosine_penalty(emb):
     n = h.size(0)
     off = (sim.sum() - sim.diagonal().sum()) / (n * (n - 1) + 1e-9)
     return off
+
+
+_SIMPLEX_CACHE = {}
+
+
+def simplex_protos(d, device, dtype=torch.float32):
+    """Regular d-simplex on S^{d-1}: K = d+1 unit vectors with pairwise
+    cos = -1/d (the neural-collapse ETF; universally optimal, Cohn-Kumar).
+    Fixed buffers -- the target configuration is set by the theorem, not learned."""
+    key = (int(d), str(device), dtype)
+    if key not in _SIMPLEX_CACHE:
+        K = d + 1
+        M = torch.eye(K) - torch.full((K, K), 1.0 / K)
+        _, _, Vt = torch.linalg.svd(M)
+        C = F.normalize(M @ Vt[:d].t(), dim=-1)
+        _SIMPLEX_CACHE[key] = C.to(device=device, dtype=dtype)
+    return _SIMPLEX_CACHE[key]
+
+
+def simplex_proto_loss(emb, tau=0.1, sinkhorn_iters=3):
+    """Deterministic spherical uniformity: Sinkhorn-balanced soft assignment of
+    unit-norm embeddings to the fixed simplex-ETF prototype bank.
+
+    emb: (..., D), flattened over leading dims. Unlike sliced regularizers
+    (SIGReg/SUSReg) there is no Monte-Carlo projection noise in the gradient;
+    unlike a Gaussian target, the bank is realizable on the sphere. Sinkhorn
+    runs in fp32 under no_grad for 16-mixed safety.
+    """
+    z = F.normalize(emb.reshape(-1, emb.size(-1)), dim=-1)
+    C = simplex_protos(z.size(-1), z.device, z.dtype)
+    sim = z @ C.t()                                    # (N, d+1)
+    with torch.no_grad():
+        Q = torch.exp(sim.float() / tau)
+        for _ in range(sinkhorn_iters):
+            Q = Q / Q.sum(0, keepdim=True).clamp_min(1e-12)
+            Q = Q / Q.sum(1, keepdim=True).clamp_min(1e-12)
+        Q = Q.to(sim.dtype)
+    return -(Q * sim).sum(1).mean()

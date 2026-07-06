@@ -1,0 +1,56 @@
+# SO(d) rotation-core spherical JEPA + simplex-ETF prototype uniformity on h.
+# The predictor applies k exact plane rotations to the unit state: planes and
+# angles come from heads over the attention features + action. Guarantees by
+# construction: ||h_pred|| == 1 exactly (zero norm drift), orthogonal Jacobian
+# in the state (no gradient vanishing/explosion along rollouts, uRNN property),
+# and an EXPLICIT step size sum|theta_i| with healthy gradients at the identity
+# (raw linear theta head, zero-init -- no saturating gate to die, cf. the
+# Push-T tangent gate-death). Pair with loss.pred.type=cosine,
+# stop_grad_target=true, loss.proto.weight>0 (see experiment cfg). CPU evidence:
+# scripts/cpu_rotation_bench.py (3-5x lower 10-step rollout error vs tangent).
+_target_: jepa.JEPA
+
+normalize_emb: true
+normalize_pred: true
+
+encoder:
+  _target_: stable_pretraining.backbone.utils.vit_hf
+  size: tiny
+  patch_size: 14
+  image_size: ${img_size}
+  pretrained: false
+  use_mask_token: false
+
+predictor:
+  _target_: variants.SphericalARPredictor
+  mode: rotation
+  rot_k: 8                  # number of learned rotation planes per step
+  update_mlp: true
+  update_mlp_hidden: 2048
+  num_frames: ${history_size}
+  input_dim: ${embed_dim}
+  hidden_dim: ${embed_dim}
+  output_dim: ${embed_dim}
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
+  emb_dropout: 0.0
+  act_dim: ${embed_dim}
+
+action_encoder:
+  _target_: module.Embedder
+  input_dim: ???
+  emb_dim: ${embed_dim}
+
+projector:
+  _target_: module.MLP
+  input_dim: ${embed_dim}
+  output_dim: ${embed_dim}
+  hidden_dim: 2048
+  norm_fn:
+    _target_: torch.nn.BatchNorm1d
+    _partial_: true
+
+pred_proj: null

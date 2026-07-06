@@ -1,0 +1,31 @@
+# @package _global_
+# ROTATION-CORE contender vs official LeWM: transitions live in SO(d) (k exact
+# plane rotations of the unit state), uniformity comes from the deterministic
+# simplex-ETF prototype loss applied DIRECTLY on h (no projector loophole --
+# cf. the TwoRoom cap under SIGReg-on-z), and the target is stop-gradded.
+# Every component answers a measured failure:
+#   * rotations: no norm drift, no rollout clumping, healthy identity gradients
+#     (Push-T tangent gate death cannot occur by parameterization);
+#   * simplex proto on h: attacks the h-cap directly, zero MC gradient noise
+#     (CPU bench: ETF family beats sliced + deterministic-density regularizers);
+#   * cosine pred + stop-grad: unchanged from the tangent recipe.
+# Follow-up knob (not enabled here): step-size grounding from true state deltas.
+defaults:
+  - override /model: rotation_spherical_simplex
+
+output_model_name: rotation_spherical_simplex
+
+loss:
+  pred:
+    type: cosine
+    stop_grad_target: true
+  sigreg:
+    weight: 0.0
+    target: none
+  proto:
+    weight: 0.1
+    tau: 0.1
+  anticollapse:
+    weight: 0.0
+  memory:
+    weight: 0.0
