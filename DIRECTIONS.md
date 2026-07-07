@@ -218,6 +218,48 @@ assignment-histogram problem." Product: a drop-in Sinkhorn-balanced spherical
 VQ (their KL, made codebook-anchored) for speech/audio codecs.
 NOTE: only finding #1 of the user's three is captured here; #2/#3 pending.
 
+## B5. Bingham directional-uncertainty head (`scripts/cpu_bingham_pose.py`)
+
+Deep-Bingham rotation head (orthonormal M + concentrations Z, MC normalizer on
+a fixed S^3 grid) vs geodesic quaternion regression; 3D rotation from 3 noisy
+matrix measurements (60/25/15 clean/medium/occluded). Verdict on the "swap the
+head, get calibrated uncertainty for free" pitch:
+
+CONFIRMED (real, keep):
+- antipodal q==-q gap EXACTLY 0 by construction (no min(+-q) hack ever);
+- mode accuracy BETTER than geodesic regression (median 5.9 vs 7.9 deg) --
+  head swap is accuracy-positive;
+- the normalization constant is differentiable + stable via fixed-grid MC
+  (the flagged bottleneck is tractable; 8192->32768 grid barely moves results,
+  so MC is NOT the limiting factor here).
+
+NOT SUPPORTED / deflators (the honest part):
+- concentration is ANTI-calibrated to occlusion: model is MORE certain on
+  occluded samples (sep clean-occl = -5 to -9, robust to readout & grid). This
+  is the heteroscedastic-NLL pitfall (Seitzer et al. ICLR'22); the beta-NLL
+  remedy made it WORSE (sep -5 -> -14), not better.
+- as an error-ranker the concentration works but is MEDIOCRE and is BEATEN by
+  the geodesic baseline's FREE pre-norm-magnitude proxy (rank-corr 0.26 vs
+  0.42; risk-coverage@25% 8.6 vs 8.2 deg). You can get comparable confidence
+  for free without Bingham in this regime.
+- CAVEAT that saves the idea: this toy uses Gaussian measurement noise, which
+  is vMF/Gaussian's home, NOT Bingham's. Bingham's real edge is MULTIMODAL /
+  SYMMETRY-induced ambiguity (symmetric object -> genuinely bimodal posterior),
+  where a single-quaternion regressor catastrophically averages. Single Bingham
+  natively covers only the ANTIPODAL case; general object symmetry needs a
+  Bingham/Kent MIXTURE -> that is a research program, NOT a plug-and-play swap.
+
+REVISED SCORING (vs the 9/10 pitch): antipodal+accuracy are free and real
+(~7/10 engineering, low risk). "Instant calibrated uncertainty from a naive
+head swap" is over-claimed and contradicted here. The genuine 10/10 ("universal
+directional-uncertainty output layer with downstream planning gains") is real
+but requires mixtures + symmetry benchmarks + the heteroscedastic fixes --
+consistent with Leonard's own "why not 10/10". NEXT TEST if pursued: object-
+symmetry ambiguity with a Bingham mixture vs regressor (the home-turf test this
+one deliberately was not). Ties to our SO(d) world model: same directional-
+output-layer question, and the mode-vs-average failure is the pose-domain
+cousin of our transition-collapse finding.
+
 ## C. Tomorrow's real-scale queue
 
 1. Static SSL small-real test (their currency, one L4/A100 session): READY —
