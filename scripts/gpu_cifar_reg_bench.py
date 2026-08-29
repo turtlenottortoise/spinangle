@@ -196,6 +196,7 @@ def run_method(name, tr, te, args, device):
     xtr, _ = tr
     n = xtr.size(0)
     t0 = time.time()
+    _step0 = None
     for ep in range(args.epochs):
         backbone.train(); proj.train(); pred.train()
         perm = torch.randperm(n, generator=g)
@@ -215,6 +216,10 @@ def run_method(name, tr, te, args, device):
                     loss = loss + 0.25 * loss_nce(z1.float(), z2.float().detach())
             scaler.scale(loss).backward()
             scaler.step(opt); scaler.update(); opt.zero_grad(); sched.step()
+            if _step0 is None:                          # first-step heartbeat
+                _step0 = time.time() - t0
+                print(f"[{name}] first step ok in {_step0:.1f}s "
+                      f"(~{_step0 * (n // args.bs) / 60:.1f} min/epoch projected)", flush=True)
         print(f"[{name}] epoch {ep + 1}/{args.epochs} loss={loss.item():.4f} "
               f"({(time.time() - t0) / (ep + 1):.1f}s/ep)", flush=True)
     m = evaluate(backbone, proj, tr, te, device)
@@ -237,9 +242,18 @@ def main():
     if args.smoke:
         args.epochs, args.bs = 1, 128
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cpu" and not args.smoke:
+        raise SystemExit(
+            "FATAL: no CUDA GPU visible — this is a GPU job. On CPU, 40 epochs of "
+            "ResNet-18 take ~10h and look like a hang. Attach a GPU runtime "
+            "(Runtime > Change runtime type > GPU) and re-run, or pass --smoke.")
+    if device == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}", flush=True)
     out = Path(args.out); out.mkdir(parents=True, exist_ok=True)
+    print("loading CIFAR-10 (downloads on first run; a hang here = blocked "
+          "network, not training)...", flush=True)
     tr, te = get_data(args.data_root, args.smoke)
-    print(f"device={device} train={tr[0].shape} methods={args.methods}")
+    print(f"device={device} train={tr[0].shape} methods={args.methods}", flush=True)
 
     rows = []
     for name in args.methods.split(","):
