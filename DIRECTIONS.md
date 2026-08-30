@@ -260,6 +260,38 @@ one deliberately was not). Ties to our SO(d) world model: same directional-
 output-layer question, and the mode-vs-average failure is the pose-domain
 cousin of our transition-collapse finding.
 
+## B6. Constraint-form anti-collapse — the mechanism that survived
+(`cpu_dual_constraint_test.py`; motivated by the cap-economics falsification)
+
+Derived-and-tested mechanisms (each aimed at a measured failure):
+- M1 kinetic floor (encoder temporal step ≥ c·state delta): PRIOR ART —
+  Temporally-Centered SIGReg (2607.26924) regularizes temporal residuals.
+  Our test adds: even in constraint form it binds exactly yet fails to
+  de-collapse (satisfiable inside the cap). Proxy constraint.
+- M2 counterfactual action-dispersion floor (act_frac as a loss): open as a
+  trained loss (only metrics/offline weights exist: 2606.24152, 2608.06706)
+  but INCONCLUSIVE here — floor met at init in this toy; needs a
+  controllability-broken setting (Push-T) to test.
+- M3 **constraint-form anti-collapse via dual ascent** (open in SSL; penalty
+  form is universal): VALIDATED in two rounds.
+  Round 1: constraints bind EXACTLY at a measured price (λ*=0.22) — dual
+  mechanics work; my proxy targets were the failure ("you get what you
+  constrain, not what you hope").
+  Round 2 (spread_dual): constraining the diagnostic itself (batch clump ≤
+  0.10) with zero fixed weights de-caps the no-regularizer rotation model:
+  clump .80→.05, |mean| .89→.21, λ* → 2.77 = the price of information,
+  discovered automatically. Caveats: erank stays low (dimensional collapse
+  needs its own constraint), motion partially restored.
+
+The salvaged framework — **diagnostic-constrained SSL**: pick the health
+diagnostics you actually care about (clump, erank, temporal motion,
+dispersion), enforce each as a constraint with its own dual-ascended
+multiplier, ZERO λ tuning, and read the converged λ* vector as interpretable
+prices. Honest grade ~7/10: mechanics proven at toy scale; needs the erank+
+motion constraint-set extension, then real scale (CIFAR bench / Push-T).
+Fits the "collapse is repricing" theory chapter exactly: dual ascent is
+automated repricing.
+
 ## C. Tomorrow's real-scale queue
 
 1. Static SSL small-real test (their currency, one L4/A100 session): READY —
