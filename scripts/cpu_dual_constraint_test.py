@@ -86,10 +86,20 @@ def run(cfg, seed):
             else:
                 loss = loss + lam2 * v2
 
+        if cfg == "spread_dual":
+            # constrain the DIAGNOSTIC itself: batch clump (mean off-diag cos)
+            # must be <= 0.10; lambda found by dual ascent, no fixed weight.
+            sim_b = z_t @ z_t.t()
+            clump_b = (sim_b.sum() - BATCH) / (BATCH * (BATCH - 1))
+            v3 = F.relu(clump_b - 0.10)
+            loss = loss + lam1 * v3
+
         opt.zero_grad(); loss.backward(); opt.step()
         with torch.no_grad():
             if cfg in ("kin_dual", "dual_full"):
                 lam1 = max(0.0, lam1 + ETA_DUAL * float(v1))
+            if cfg == "spread_dual":
+                lam1 = max(0.0, lam1 + ETA_DUAL * float(v3))
             if cfg == "dual_full":
                 lam2 = max(0.0, lam2 + ETA_DUAL * float(v2))
 
