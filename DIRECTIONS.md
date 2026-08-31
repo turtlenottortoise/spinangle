@@ -260,8 +260,11 @@ one deliberately was not). Ties to our SO(d) world model: same directional-
 output-layer question, and the mode-vs-average failure is the pose-domain
 cousin of our transition-collapse finding.
 
-## B6. Constraint-form anti-collapse — the mechanism that survived
-(`cpu_dual_constraint_test.py`; motivated by the cap-economics falsification)
+## B6. Constraint-form anti-collapse — survived round 2, deflated by round 3
+(`cpu_dual_constraint_test.py`; motivated by the cap-economics falsification.
+NOTE the earlier claim "fixed-weight hinges lose the economics tug-of-war"
+was true only for PROXY hinges; a fixed-weight hinge on the right diagnostic
+wins — see round 3 below.)
 
 Derived-and-tested mechanisms (each aimed at a measured failure):
 - M1 kinetic floor (encoder temporal step ≥ c·state delta): PRIOR ART —
@@ -272,25 +275,47 @@ Derived-and-tested mechanisms (each aimed at a measured failure):
   trained loss (only metrics/offline weights exist: 2606.24152, 2608.06706)
   but INCONCLUSIVE here — floor met at init in this toy; needs a
   controllability-broken setting (Push-T) to test.
-- M3 **constraint-form anti-collapse via dual ascent** (open in SSL; penalty
-  form is universal): VALIDATED in two rounds.
+- M3 **constraint-form anti-collapse via dual ascent**: validated, then
+  DEFLATED by its own control. Three rounds.
   Round 1: constraints bind EXACTLY at a measured price (λ*=0.22) — dual
   mechanics work; my proxy targets were the failure ("you get what you
   constrain, not what you hope").
   Round 2 (spread_dual): constraining the diagnostic itself (batch clump ≤
   0.10) with zero fixed weights de-caps the no-regularizer rotation model:
-  clump .80→.05, |mean| .89→.21, λ* → 2.77 = the price of information,
-  discovered automatically. Caveats: erank stays low (dimensional collapse
-  needs its own constraint), motion partially restored.
+  clump .80→.05, |mean| .89→.21, λ* → 2.77. Caveats: erank stays low,
+  motion partially restored.
+  Round 3 (spread_fix, the exact-penalty control): the SAME hinge with a
+  FIXED weight w=10 > λ* matches spread_dual on every metric (clump .040 vs
+  .049, erank 12.8 vs 10.7, pred/roll10/retr identical). Exact-penalty
+  theory predicted this — a hinge is zero inside the feasible set, so any
+  w above the shadow price yields the constrained solution. CONCLUSION:
+  the active ingredient is TARGET SELECTION (constrain the diagnostic, not
+  a proxy), not the multiplier dynamics. Dual ascent = auto-weighting
+  convenience + a λ readout, not extra capability.
 
-The salvaged framework — **diagnostic-constrained SSL**: pick the health
-diagnostics you actually care about (clump, erank, temporal motion,
-dispersion), enforce each as a constraint with its own dual-ascended
-multiplier, ZERO λ tuning, and read the converged λ* vector as interpretable
-prices. Honest grade ~7/10: mechanics proven at toy scale; needs the erank+
-motion constraint-set extension, then real scale (CIFAR bench / Push-T).
-Fits the "collapse is repricing" theory chapter exactly: dual ascent is
-automated repricing.
+Honest post-control status of **diagnostic-constrained SSL** (~4/10 as a
+standalone paper, useful as a section):
+- What survives: "you get what you constrain" (proxy constraints bind but
+  don't de-cap; diagnostic constraints do) + hinge-on-diagnostic needs no
+  weight tuning (any w > λ* works; dual finds λ* for you). Multi-constraint
+  auto-balancing is a real engineering win (K fixed weights = grid search).
+- What died: "constraints beat penalties" — falsified by round 3. Also
+  structural overlap: hinge-on-a-spread-diagnostic IS VICReg's variance
+  term (relu(γ − std) with fixed weight, 2021) on a different statistic.
+- Math dings: no strong duality (nonconvex) so λ* is not a certified price;
+  our relu'd update λ←λ+η·relu(g) is a RATCHET (λ never decreases →
+  complementary slackness violated: final λ=2.77 with clump strictly
+  feasible at .049 — λ* is a path artifact, an overestimate of any
+  equilibrium price; textbook signed update λ←[λ+η·g]₊ would decay);
+  batch statistic ⇒ stochastic constraint ⇒ λ drift (needs EMA / Cotter
+  et al. treatment); nonconvex GDA gives stationarity only, oscillation
+  risk is why PID-Lagrangian (Stooke 2020) exists.
+- Prior art: Cotter et al. 2019/TFCO (constrained ML), RCPO + Safety-Gym
+  Lagrangian RL, GradNorm/Kendall (auto-weighting). Mechanism is standard
+  outside SSL; the SSL-collapse framing + falsification chain is the only
+  fresh part. One untested regime where dual might genuinely beat fixed-w:
+  early-training ramp (λ starts 0) vs a large fixed w distorting warmup at
+  real scale — toy shows no difference; GPU could.
 
 ## C. Tomorrow's real-scale queue
 

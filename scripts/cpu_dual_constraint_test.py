@@ -21,6 +21,18 @@ References: rot+reg (simplex penalty) and rot_noreg (cap collapse).
 Success = restore latent motion & spread (clump ~ rot+reg) without any
 marginal regularizer; report converged lambda* = the measured price of
 information the economics framing predicts.
+
+POST-HOC (results/cpu_dual_constraint_test*.json): proxy constraints
+(kin/disp) bind exactly yet fail to de-cap in BOTH forms; constraining the
+diagnostic itself (spread_dual: batch clump <= 0.10) de-caps. But the
+exact-penalty control spread_fix (same hinge, fixed w=10 > lambda*=2.77)
+matches spread_dual on every metric — so the docstring's "fixed-weight
+hinges lose by construction" holds only for proxy targets. Active
+ingredient = target selection; dual ascent = auto-weighting + lambda
+readout, not extra capability. Also: our relu'd update is a ratchet
+(lambda never decreases), so reported lambda* violates complementary
+slackness (clump ends strictly feasible at .049) — a path artifact, not
+an equilibrium shadow price.
 """
 import json
 import sys
@@ -86,13 +98,15 @@ def run(cfg, seed):
             else:
                 loss = loss + lam2 * v2
 
-        if cfg == "spread_dual":
+        if cfg in ("spread_dual", "spread_fix"):
             # constrain the DIAGNOSTIC itself: batch clump (mean off-diag cos)
-            # must be <= 0.10; lambda found by dual ascent, no fixed weight.
+            # must be <= 0.10. spread_dual: lambda by dual ascent. spread_fix:
+            # exact-penalty control -- fixed w=10 > lambda* (hinge is zero
+            # inside the feasible set, so a large weight should not distort).
             sim_b = z_t @ z_t.t()
             clump_b = (sim_b.sum() - BATCH) / (BATCH * (BATCH - 1))
             v3 = F.relu(clump_b - 0.10)
-            loss = loss + lam1 * v3
+            loss = loss + (lam1 if cfg == "spread_dual" else 10.0) * v3
 
         opt.zero_grad(); loss.backward(); opt.step()
         with torch.no_grad():
